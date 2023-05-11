@@ -33,8 +33,8 @@ CMD_RESPONSE_WRONG="locates at '^'"
 CMD_RESPONSE_FAILURE="Failure"
 
 ; === setup default configuration file ===
-;cfgFile=""
-cfgFile="Z:\documents\OLT\Huawei MA5800-X7\TeraTermMacro\HuaweiMA5800-X7-ONT_GPT5610C1-BSQA_ENV-DownlinkPort_12.cfg"
+cfgFile=""
+;cfgFile="Z:\documents\OLT\Huawei MA5800-X7\TeraTermMacro\HuaweiMA5800-X7_ONT_GPT-5610C1_BSQA-ENV.cfg"
 
 ; === setup default value for global parameters(get form configuration file) ===
 op_mode=0

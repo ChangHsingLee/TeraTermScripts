@@ -1,0 +1,235 @@
+GPT-6651BN4A8Cv3 (HGU)
+
+Internet: 
+	VID: 6
+	PPPoE
+	NAT
+VoIP: 
+	VID: 3
+	IPoE
+	NAT
+
+IPTV: 
+	VID: 2
+	IPoE
+	NAT
+	IP: 2.2.2.2
+
+GPON Serial Number:	MSTC11123456
+
+//---- create ONT profile ----
+ont-profile add profile-name "GPT-6651BN4A8Cv3" 
+// POTS:n, POTS ports:0, ETH:y, ETH ports:4, VDSL:n, VDSL ports:0, TDM:1, TDM type:1, TDM ports:0, MOCA ports:0,
+// CATV:n, CATV ports:0, WiFi ports:2, Mapping mode:1-VLANID,flow control:1-PQ 
+
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 4, 10G, max. bandwidth is 9484032 (use command "display port info <port_id>" to check it)
+dba-profile add profile-name "DMS-4-10G" type4 max 9480000
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 2.5G/10G
+dba-profile add profile-name "DMS-3-2.5G-10G" type3 assure 2500000 max 10000000
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 4, 1G
+dba-profile add profile-name "DMS-4-1G" type4 max 1024000
+
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 1536K/1536K (for T-CONT 1, upstream, IPTV)
+dba-profile add profile-id 51 type 3 assure 1536 max 1536
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 2560K/2560K (for T-CONT 3, VoIP)
+dba-profile add profile-id 46 type 3 assure 2560 max 2560
+//---- default DBA profile (Profile ID=2), type 1, Fix 1024kbps (for T-CONT 0, OMCI)
+
+
+//---- add ONT ---- 
+// Frame ID:0, Slot ID: 2, Port ID: 11, ONT ID: 27
+// T-CONT ID0: fix bandwidth 1024kbps
+interface gpon 0/2
+// CMD: ont add <port_id> <ont_id> sn-auth <PON_serial_number> profile-name <ont_profile_name> desc <ont_description_string> manage-mode {omci|}
+ont add 11 27 sn-auth "MSTC11123456" profile-name "GPT-6651BN4A8Cv3" desc "GPT-6651BN4A8Cv3-HGU-MSTC11123456" manage-mode omci ont-type 10G/10G
+
+// setup tcont for OMCI (DBA fixed, id '2' is default setting in OLT)
+tcont modify-profile 11 27 0 profile-id 2
+
+//---- Data Service ---- 
+// up-link(VLAN ID: 204) <- VLAN ID 288 -> down-link(VLAN ID: 6)
+// T-CONT ID2: max bandwidth 10G
+// GEM port ID: 271, Service Port ID: 11271
+
+// CMD: tcont bind-profile <port_id> <ont_id> <tcont_id_listxxxxxxxx> profile-name <dba_profile_name>
+tcont bind-profile 11 27 2 profile-name "DMS-4-1G"
+
+// create GEM port(ID=271) for bridge mode (service type is 'eth')
+// CMD: gemport add <port_id> gemportid <id> {eth|tdm} [encrypt {on|off}]
+gemport add 11 gemportid 271 eth encrypt on
+
+// GEM port bind to tcont (tcont_id=2)
+// CMD: ont gemport bind <port_id> <ont_id> <gemport_id> <tcont_id>
+ont gemport bind 11 27 271 2 priority-queue 0
+
+// GEM port mapping to VLAN ID: 288
+// CMD: ont gemport mapping <port_id> <ont_id> <gemport_id> valn <vlan_id>
+ont gemport mapping 11 27 271 vlan 288
+
+// UNI vlan id=6, translate to vlan 288 (down-stream)
+// CMD: ont port vlan <port_id> <ont_id> eth <vlan_id> <ont_port_list> translation s-vlan <vlan_id>
+ont port vlan 11 27 eth 6 1-4 translation s-vlan 288
+
+quit
+
+// OLT receivce setting, ANI vlan id=204, vlan translate, inbound/outbound speed limitation
+service-port 11271 vlan 204 gpon 0/2/11 gemport 271 multi-service user-vlan 288 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+// max. number of client(MAC address) can connect to service-port
+mac-address max-mac-count service-port 11271 4
+
+// setup description of service-port
+service-port desc 11271 description "11271-Internet-Service"
+
+//---- IPTV service ----
+// up-link(VLAN ID: 600) <- VLAN ID 2 -> down-link(VLAN ID: 2)
+// T-CONT ID1: type 3, 1536K/1536K
+// GEM port ID: 272, Service Port ID: 11272
+
+interface gpon 0/2
+// CMD: tcont bind-profile <port_id> <ont_id> <tcont_id_listxxxxxxxx> profile-name <dba_profile_name>
+tcont bind-profile 11 27 1 profile-id 51
+
+// create GEM port(ID=272) for bridge mode (service type is 'eth')
+// CMD: gemport add <port_id> gemportid <id> {eth|tdm} [encrypt {on|off}]
+gemport add 11 gemportid 272 eth encrypt on
+
+// GEM port bind to tcont (tcont_id=1)
+// CMD: ont gemport bind <port_id> <ont_id> <gemport_id> <tcont_id>
+ont gemport bind 11 27 272 1 priority-queue 2
+
+// GEM port mapping to VLAN ID: 2
+// CMD: ont gemport mapping <port_id> <ont_id> <gemport_id> valn <vlan_id>
+ont gemport mapping 11 27 272 vlan 2
+
+// UNI vlan id=2, translate to vlan 2 (down-stream)
+// CMD: ont port vlan <port_id> <ont_id> eth <vlan_id> <ont_port_list> translation s-vlan <vlan_id>
+ont port vlan 11 27 eth 2 1-4 translation s-vlan 2 
+
+// multicast forward mode (translate to VLAN ID 2)
+// CMD: ont multicast-forward <port_id> <ont_id> {tag|unconcern|untag} translation <vlan_id>
+ont multicast-forward 11 27 tag translation 2
+
+quit
+
+// OLT receivce setting, ANI vlan id=600, vlan translate, inbound/outbound speed limitation
+// CMD: service-port <service_port_id> vlan gpon <frame_id/slot_id/port_id> gemport <gemport_id> multi-service user-vlan <vlan_id> translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+service-port 11272 vlan 600 gpon 0/2/11 gemport 272 multi-service user-vlan 2 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+service-port desc 11272 description "11271-IPTV-Service"
+
+// change to btv config mode
+btv
+// user be authenticated, user's max available programs at the same time
+// CMD: igmp user add service-port <service_port_id> auth max-program {1~64|no-limit}
+igmp user add service-port 11272 auth max-program 12
+// setup multicast VLAN mode for VLAN ID 509
+// CMD: multicast-vlan <vlan_id>
+multicast-vlan 509
+igmp multicast-vlan member service-port 11272
+// setup multicast VLAN mode for VLAN ID 1218
+// CMD: multicast-vlan <vlan_id>
+multicast-vlan 1218
+igmp multicast-vlan member service-port 11272
+// back to btv config mode
+btv
+// CMD: igmp user bind-profile service-port <service_port_id> profile-index-list <list>
+//igmp user bind-profile service-port 11272 profile-index-list 1-10,29,63-64,1218
+//igmp user bind-profile service-port 11272 profile-index-list 1-6,1218
+igmp user bind-profile service-port 11272 profile-index-list 1-3,6,1218
+
+quit
+
+//---- VoIP service ----
+// up-link(VLAN ID: 408) <- VLAN ID 3 -> down-link(VLAN ID: 3)
+// T-CONT ID3: 
+// GEM port ID: 273, Service Port ID: 11273
+interface gpon 0/2
+
+tcont bind-profile 11 27 3 profile-id 46
+
+gemport add 11 gemportid 273 eth encrypt on
+
+ont gemport bind 11 27 273 3 priority-queue 3
+
+ont gemport mapping 11 27 273 vlan 3
+
+ont port vlan 11 27 eth 3 1 
+
+quit
+
+service-port 11273 vlan 408 gpon 0/2/11 gemport 273 multi-service user-vlan 3 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+service-port desc 11273 description "11273-VoIP-Service"
+
+mac-address max-mac-count service-port 11273 2
+
+=================================================================================================================================
+// ---- Delete Data Service ----
+undo service-port 11271
+
+interface gpon 0/2
+
+undo ont port vlan 11 27 eth 6 1
+
+undo ont gemport mapping 11 27 271
+
+undo ont gemport bind 11 27 271
+
+gemport delete 11 gemportid 271 
+
+undo tcont bind-profile 11 27 2
+
+quit
+
+// ---- Delete IPTV Service ----
+btv
+
+igmp user delete service-port 11272
+y
+
+quit
+
+undo bind ip service-port 11272 all
+
+undo service-port 11272
+
+interface gpon 0/2
+
+ont multicast-forward 11 27 unconcern
+
+undo ont port vlan 11 27 eth 2 1
+
+undo ont gemport mapping 11 27 272 
+
+undo ont gemport bind 11 27 272
+
+gemport delete 11 gemportid 272
+
+undo tcont bind-profile 11 27 1
+
+quit
+
+// ---- Delete VoIP Service ----
+undo service-port 11273
+
+interface gpon 0/2
+
+undo ont port vlan 11 27 eth 3 1
+
+undo ont gemport mapping 11 27 273 
+
+undo ont gemport bind 11 27 273 
+
+gemport delete 11 gemportid 273
+
+undo tcont bind-profile 11 27 3
+
+quit
+
+// ---- Delete ONT ----
+interface gpon 0/2
+ont delete 11 27
+quit
+
+

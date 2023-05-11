@@ -1,0 +1,356 @@
+--------------- ONT Setting (Cortina CA8271NS, SDK R2.2.1.4 ---------------------
+/etc/scfg/scfg.txt:
+	//PON S/N: ZYXE11123456
+	//PON S/N: CXNK44345678
+	PON S/N: MSTC63728C33
+	STRING CFG_ID_PON_VENDOR_ID = MSTC;
+	INT CFG_ID_PON_VSSN = 0x63728C33;
+	MAC CFG_ID_NE_MAC_ADDR0 = B8:FF:B3:0D:06:71;
+
+/etc/omci.config:
+	olt_type       = "HUAWEI" or "ZYXEL"
+	omcc_ver       = "A2"
+
+// frame ID/slot ID/port ID
+Downlink: 0/2/12
+Uplink  : 0/1/0
+--------------- OLT setting -------------------------
+// enter config mode
+enable
+config
+
+//---- create ONT profile ----
+ont-profile add profile-name "DMS-ONT-GPT5610C" 
+// POTS:n, POTS ports:0, ETH:y, ETH ports:1, VDSL:n, VDSL ports:0, TDM:1, TDM type:1, TDM ports:0, MOCA ports:0,
+// CATV:n, CATV ports:0, WiFi ports:0, Mapping mode:1-VLANID,flow control:1-PQ 
+
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 4, 10G, max. bandwidth is 9484032 (use command "display port info <port_id>" to check it)
+dba-profile add profile-name "DMS-4-10G" type4 max 9480000
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 2.5G/10G
+dba-profile add profile-name "DMS-3-2.5G-10G" type3 assure 2500000 max 10000000
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 4, 1G
+dba-profile add profile-name "DMS-4-1G" type4 max 1024000
+
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 1536K/1536K (for T-CONT 1, upstream, IPTV)
+dba-profile add profile-id 51 type 3 assure 1536 max 1536
+//---- create DBA profile (Dynamic Bandwidth Assignment), type 3, 2560K/2560K (for T-CONT 3, VoIP)
+dba-profile add profile-id 46 type 3 assure 2560 max 2560
+//---- default DBA profile (Profile ID=2), type 1, Fix 1024kbps (for T-CONT 0, OMCI)
+
+//---- add ONT ---- 
+// Frame ID:0, Slot ID: 2, Port ID: 12, ONT ID: 1
+// T-CONT ID0: fix bandwidth 1024kbps
+interface gpon 0/2
+// CMD: ont add <port_id> <ont_id> sn-auth <PON_serial_number> profile-name <ont_profile_name> desc <ont_description_string> manage-mode {omci|}
+ont add 12 1 sn-auth "MSTC63728C33" profile-name "DMS-ONT-GPT5610C" desc "DMS-ONT-10G-MSTC63728C33" manage-mode omci ont-type 10G/10G
+
+// setup tcont for OMCI (DBA fixed, id '2' is default setting in OLT)
+tcont modify-profile 12 1 0 profile-id 2
+
+// untagged on UNI interface
+//ont native-vlan 12 1 unconcern
+
+//---- Data Service ---- 
+// up-link(VLAN ID: 204) <- VLAN ID 288 -> down-link(VLAN ID: 3000)
+// T-CONT ID2: max bandwidth 10G
+// GEM port ID: 261, Service Port ID: 12011
+
+// CMD: tcont bind-profile <port_id> <ont_id> <tcont_id_listxxxxxxxx> profile-name <dba_profile_name>
+tcont bind-profile 12 1 2 profile-name "DMS-4-1G"
+
+// create GEM port(ID=261) for bridge mode (service type is 'eth')
+// CMD: gemport add <port_id> gemportid <id> {eth|tdm} [encrypt {on|off}]
+gemport add 12 gemportid 261 eth encrypt on
+
+// GEM port bind to tcont (tcont_id=2)
+// CMD: ont gemport bind <port_id> <ont_id> <gemport_id> <tcont_id>
+ont gemport bind 12 1 261 2 priority-queue 0
+
+// GEM port mapping to VLAN ID: 288
+// CMD: ont gemport mapping <port_id> <ont_id> <gemport_id> valn <vlan_id>
+ont gemport mapping 12 1 261 vlan 288
+
+// UNI vlan id=3000, translate to vlan 288 (down-stream)
+// CMD: ont port vlan <port_id> <ont_id> eth <vlan_id> <ont_port_list> translation s-vlan <vlan_id>
+ont port vlan 12 1 eth 3000 1 translation s-vlan 288
+
+quit
+
+// OLT receivce setting, ANI vlan id=204, vlan translate, inbound/outbound speed limitation
+service-port 12011 vlan 204 gpon 0/2/12 gemport 261 multi-service user-vlan 288 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+// max. number of client(MAC address) can connect to service-port
+mac-address max-mac-count service-port 12011 4
+
+// setup description of service-port
+service-port desc 12011 description GPT-5610C1_Dport12_ID1
+
+
+//---- IPTV service ----
+// up-link(VLAN ID: 600) <- VLAN ID 2 -> down-link(VLAN ID: 2)
+// T-CONT ID1: type 3, 1536K/1536K
+// GEM port ID: 262, Service Port ID: 12012
+
+interface gpon 0/2
+// CMD: tcont bind-profile <port_id> <ont_id> <tcont_id_listxxxxxxxx> profile-name <dba_profile_name>
+tcont bind-profile 12 1 1 profile-id 51
+
+// create GEM port(ID=262) for bridge mode (service type is 'eth')
+// CMD: gemport add <port_id> gemportid <id> {eth|tdm} [encrypt {on|off}]
+gemport add 12 gemportid 262 eth encrypt on
+
+// GEM port bind to tcont (tcont_id=1)
+// CMD: ont gemport bind <port_id> <ont_id> <gemport_id> <tcont_id>
+ont gemport bind 12 1 262 1 priority-queue 2
+
+// GEM port mapping to VLAN ID: 2
+// CMD: ont gemport mapping <port_id> <ont_id> <gemport_id> valn <vlan_id>
+ont gemport mapping 12 1 262 vlan 2
+
+// UNI vlan id=2, translate to vlan 2 (down-stream)
+// CMD: ont port vlan <port_id> <ont_id> eth <vlan_id> <ont_port_list> translation s-vlan <vlan_id>
+ont port vlan 12 1 eth 2 1 translation s-vlan 2
+
+// UNI untagged, translate to vlan 2 (down-stream)
+// CMD: ont port vlan <port_id> <ont_id> eth untagged user-encap IPoE <ont_port_list> q-in-q s-vlan <vlan_id>
+//ont port vlan 12 1 eth untagged user-encap IPoE 1 q-in-q s-vlan 2
+
+// multicast forward mode (translate to VLAN ID 2)
+// CMD: ont multicast-forward <port_id> <ont_id> {tag|unconcern|untag} translation <vlan_id>
+ont multicast-forward 12 1 tag translation 2
+
+quit
+
+// OLT receivce setting, ANI vlan id=600, vlan translate, inbound/outbound speed limitation
+// CMD: service-port <service_port_id> vlan gpon <frame_id/slot_id/port_id> gemport <gemport_id> multi-service user-vlan <vlan_id> translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+service-port 12012 vlan 600 gpon 0/2/12 gemport 262 multi-service user-vlan 2 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+service-port desc 12012 description "GPT-5610C1_Dport12_ID2"
+
+// change to btv config mode
+btv
+// user be authenticated, user's max available programs at the same time
+// CMD: igmp user add service-port <service_port_id> auth max-program {1~64|no-limit}
+igmp user add service-port 12012 auth max-program 12
+// setup multicast VLAN mode for VLAN ID 509
+// CMD: multicast-vlan <vlan_id>
+multicast-vlan 509
+igmp multicast-vlan member service-port 12012
+// setup multicast VLAN mode for VLAN ID 1218
+// CMD: multicast-vlan <vlan_id>
+multicast-vlan 1218
+igmp multicast-vlan member service-port 12012
+// back to btv config mode
+btv
+// CMD: igmp user bind-profile service-port <service_port_id> profile-index-list <list>
+//igmp user bind-profile service-port 12012 profile-index-list 1-10,29,63-64,1218
+//igmp user bind-profile service-port 12012 profile-index-list 1-6,1218
+igmp user bind-profile service-port 12012 profile-index-list 1-3,6,1218
+
+quit
+
+
+//---- VoIP service ----
+// up-link(VLAN ID: 408) <- VLAN ID 3 -> down-link(VLAN ID: 3)
+// T-CONT ID3: 
+// GEM port ID: 263, Service Port ID: 12013
+interface gpon 0/2
+
+tcont bind-profile 12 1 3 profile-id 46
+
+gemport add 12 gemportid 263 eth encrypt on
+
+ont gemport bind 12 1 263 3 priority-queue 3
+
+ont gemport mapping 12 1 263 vlan 3
+
+ont port vlan 12 1 eth 3 1 
+
+quit
+
+service-port 12013 vlan 408 gpon 0/2/12 gemport 263 multi-service user-vlan 3 tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit
+
+service-port desc 12013 description "GPT-5610C1_Dport12_ID3"
+
+mac-address max-mac-count service-port 12013 2
+
+
+=================================================================================================================================
+// ---- Delete Data Service ----
+undo service-port 12011
+
+interface gpon 0/2
+
+undo ont port vlan 12 1 eth 3000 1
+
+undo ont gemport mapping 12 1 261
+
+undo ont gemport bind 12 1 261
+
+gemport delete 12 gemportid 261 
+
+undo tcont bind-profile 12 1 2
+
+quit
+
+// ---- Delete IPTV Service ----
+btv
+
+igmp user delete service-port 12012
+y
+
+quit
+
+undo bind ip service-port 12012 all
+
+undo service-port 12012
+
+interface gpon 0/2
+
+ont multicast-forward 12 01 unconcern
+
+undo ont port vlan 12 01 eth 2 1
+//  undo ont port vlan 12 01 eth untagged IPoE 1
+
+undo ont gemport mapping 12 1 262 
+
+undo ont gemport bind 12 1 262
+
+gemport delete 12 gemportid 262
+
+undo tcont bind-profile 12 1 1
+
+quit
+
+
+// ---- Delete VoIP Service ----
+undo service-port 12013
+
+interface gpon 0/2
+
+undo ont port vlan 12 1 eth 3 1
+
+undo ont gemport mapping 12 1 263 
+
+undo ont gemport bind 12 1 263 
+
+gemport delete 12 gemportid 263
+
+undo tcont bind-profile 12 1 3
+
+quit
+
+// ---- Delete ONT ----
+interface gpon 0/2
+ont delete 12 1
+quit
+
+
+==================================================================================================
+// DBA profile id 2
+  -----------------------------------------------------------------
+  Profile-name :            dba-profile_2
+  Profile-ID:               2
+  type:                     1
+  Bandwidth compensation:   No
+  Fix-delay:                No
+  Fix(kbps):                1024
+  Assure(kbps):             0
+  Max(kbps):                0
+  Additional-bandwidth:     -
+  Best-effort-priority:     -
+  Best-effort-weight:       -
+  bind-times:               12
+  -----------------------------------------------------------------
+
+// DBA profile id 51:
+  -----------------------------------------------------------------
+  Profile-name :            tcont_ONT_1M_TV
+  Profile-ID:               51
+  type:                     3
+  Bandwidth compensation:   No
+  Fix-delay:                No
+  Fix(kbps):                0
+  Assure(kbps):             1536
+  Max(kbps):                1536
+  Additional-bandwidth:     -
+  Best-effort-priority:     -
+  Best-effort-weight:       -
+  bind-times:               14
+  -----------------------------------------------------------------
+
+// ONT profile "DMS-ONT-GPT5610C"
+  ---------------------------------------------------------------------------
+  Profile ID  : 17
+  Profile name: DMS-ONT-GPT5610C
+  ---------------------------------------------------------------------------
+  Number of POTS ports:               0
+  Number of max POTS adaptive:        -
+  Number of ETH ports:                adaptive
+  Number of max ETH adaptive:         1
+  Number of VDSL ports:               0
+  Number of max VDSL adaptive:        -
+  TDM port type:                      E1
+  TDM service type:                   TDMoGem
+  Number of TDM ports:                0
+  Number of MOCA ports:               0
+  Number of CATV UNI ports:           0
+  Number of max CATV UNI adaptive:    -
+  Mapping mode:                       VLAN ID
+  The type of flow control:           PQ
+  ---------------------------------------------------------------------------
+  Binding times:                      1
+  ---------------------------------------------------------------------------
+
+
+// IGMP profile index 1
+  ------------------------------------------------------------------------
+  Program Program          VLAN  IP              Source          Right
+  index   name             ID    address         IP address
+  ------------------------------------------------------------------------
+  1       LAB1             509   230.100.1.1     -               watch
+  ------------------------------------------------------------------------
+  Total:1
+
+// IGMP profile index 2
+  ------------------------------------------------------------------------
+  Program Program          VLAN  IP              Source          Right
+  index   name             ID    address         IP address
+  ------------------------------------------------------------------------
+  2       LAB2             509   230.100.1.2     -               watch
+  3       LAB3             509   230.100.1.3     -               watch
+  ------------------------------------------------------------------------
+  Total:2
+
+// IGMP profile index 3
+  ------------------------------------------------------------------------
+  Program Program          VLAN  IP              Source          Right
+  index   name             ID    address         IP address
+  ------------------------------------------------------------------------
+  4       LAB4             509   230.100.1.4     -               watch
+  5       LAB5             509   230.100.1.5     -               watch
+  ------------------------------------------------------------------------
+  Total:2
+
+// IGMP profile index 6
+  ------------------------------------------------------------------------
+  Program Program          VLAN  IP              Source          Right
+  index   name             ID    address         IP address
+  ------------------------------------------------------------------------
+  6       LAB6             509   230.100.1.6     -               watch
+  ------------------------------------------------------------------------
+  Total:1
+
+// IGMP profile index 1218
+  ------------------------------------------------------------------------
+  Program Program          VLAN  IP              Source          Right
+  index   name             ID    address         IP address
+  ------------------------------------------------------------------------
+  1256    AMLAB1           1218  233.22.133.1    -               watch
+  1257    AMLAB2           1218  233.22.133.2    -               watch
+  1258    AMLAB3           1218  233.22.133.3    -               watch
+  1259    AMLAB4           1218  233.22.133.4    -               watch
+  1260    AMLAB5           1218  233.22.133.5    -               watch
+  ------------------------------------------------------------------------
+  Total:5
+
