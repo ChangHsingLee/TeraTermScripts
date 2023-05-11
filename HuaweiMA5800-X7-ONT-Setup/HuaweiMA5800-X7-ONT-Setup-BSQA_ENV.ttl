@@ -1,0 +1,2152 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                                              ;
+; This script is used to setup HUAWEI MA5800-X7 OLT for ONT.   ;
+;                                                              ;
+; Prerequisites:                                               ;
+;   1. Configuration mode: distributing-mode                   ;
+;   2. ONT profile (need to specify profile name)              ;
+;   3. Prepare DBA profile for TCONT0 (need to specify ID)     ;
+;   4. Prepare DBA profile for Data Service                    ;
+;   5. Prepare DBA profile for IPTV Service                    ;
+;   6. Prepare DBA profile for VoIP Service                    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; === Notes ===
+; Maximum length of string: 511 (see https://ttssh2.osdn.jp/manual/4/en/macro/syntax/types.html)
+
+; === constant value ===
+MIN_GEMPORT_ID=128
+RESERVE_SERVICE_PORT_NO=10
+
+PROMPT_USER_CHAR=">"
+PROMPT_ADMIN_CHAR="#"
+PROMPT_DIAG_MODE="(diagnose)%%"
+PROMPT_CFG_MODE="(config)#"
+PROMPT_BTV_MODE="(config-btv)#"
+PROMPT_INPUT_CR_REGEX = "^{ <cr>.* }: $"
+;PROMPT_INPUT_CR_K="{ <cr>||<K> }:"
+;PROMPT_INPUT_CR_CASCADE="{ <cr>|cascade<K> }:"
+;PROMPT_INPUT_CR_DOWNSTREAM_PQ="{ <cr>|downstream-priority-queue<K> }:"
+PROMPT_YES_NO="(y/n)"
+
+CMD_RESPONSE_WRONG="locates at '^'"
+CMD_RESPONSE_FAILURE="Failure"
+
+; === setup default configuration file ===
+;cfgFile=""
+cfgFile="Z:\documents\OLT\Huawei MA5800-X7\TeraTermMacro\HuaweiMA5800-X7-ONT_GPT5610C1-BSQA_ENV-DownlinkPort_12.cfg"
+
+; === setup default value for global parameters(get form configuration file) ===
+op_mode=0
+log_file=""
+olt_ip="10.11.104.19"
+olt_user="RDtest"
+olt_passwd="RDtest1234"
+olt_uplinkStr=""
+olt_downlinkStr=""
+ont_id=0
+ont_desc=""
+ont_profile=""
+ont_speedStr="auto"
+ont_auth_type=0
+ont_eth_ports=1
+pon_sn=""
+ploam_passwd_str=""
+ploam_passwd_hex=""
+tcont0_dba_id=2
+
+data_tcont_id=2
+data_dba_profile=""
+data_dba_profile_id=-1
+data_gemport_id=-1
+data_service_type="eth"
+data_gemport_encrypt="on"
+data_pqn=0
+data_uni_vlan_id=3000
+data_ani_vlan_id=204
+data_port_id=-1
+data_port_desc=""
+data_max_connection=1
+
+iptv_tcont_id=1
+iptv_dba_profile=""
+iptv_dba_profile_id=-1
+iptv_gemport_id=-1
+iptv_service_type="eth"
+iptv_gemport_encrypt="on"
+iptv_pqn=2
+iptv_uni_vlan_id=2
+iptv_ani_vlan_id=600
+iptv_port_id=-1
+iptv_port_desc=""
+iptv_max_program=4
+iptv_multicast_vlan_list="509,1218"
+iptv_igmp_profile_list=""
+
+voip_tcont_id=3
+voip_dba_profile=""
+voip_dba_profile_id=-1
+voip_gemport_id=-1
+voip_service_type="eth"
+voip_gemport_encrypt="on"
+voip_pqn=3
+voip_uni_vlan_id=3
+voip_ani_vlan_id=408
+voip_port_id=-1
+voip_port_desc=""
+voip_max_connection=2
+
+
+; === Internal parameters, will be auto-generate or temporary used ===
+errorFlag=0
+finishSteps=0
+dataFinishSteps=0
+voipFinishSteps=0
+iptvFinishSteps=0
+logEnabled=0
+dataServiceEnabled=0
+iptvServiceEnabled=1
+voipServiceEnabled=0
+tmpStr=""
+tmpVal=0
+errMsg=""
+logMsg=""
+waitMsg=""
+cmdMsg=""
+oltUplinkFrameID=0
+oltUplinkSlotID=0
+oltUplinkPortID=0
+oltDownlinkFrameID=0
+oltDownlinkSlotID=0
+oltDownlinkPortID=0
+
+
+; !!!! Program START !!!!
+; === Minimizes MACRO dialog box ===
+show 0
+
+; === check current version of TeraTerm, must uses version 4.78 or later ===
+getver ttVer "4.78"
+if result < 0 then
+	sprintf2 errMsg "TeraTerm version is v%s, it is too old, please migrate to v%s+" ttVer "4.78"
+	goto errExit
+endif
+
+; === find the configuration file ===
+call findCfgFile
+
+; === open/parse configuration file(read-only) ===
+call parseCfgFile
+
+; === sanity check ===
+call sanityCheck
+
+; === Terminates the link between the current TeraTerm window and MACRO ===
+;--- keep current TeraTerm window and create new TeraTerm window for next connection
+;unlink
+; === disconnect host/device connection if connection established ===
+;--- use current TeraTerm window for next connection
+testlink
+if result == 2 then
+	disconnect 0
+	waitevent 4
+endif
+
+; === create log file ===
+logEnabled=0
+strlen log_file
+if result <> 0 then
+	logopen log_file 0 0 1 1
+	if result <> 0 then
+		sprintf2 errMsg "fail to logging file: %s" log_file
+		goto errExit
+	endif
+	logEnabled=1
+endif
+
+; === connect to OLT management port ===
+call sshConnectOltMgmPort
+wait PROMPT_USER_CHAR
+;--- enter config mode
+sendln "enable"
+wait PROMPT_ADMIN_CHAR
+sendln "config"
+wait PROMPT_CFG_MODE
+
+; === check configuration mode, must be 'distributing-mode' ===
+call chkCfgMode
+
+; === Prerequisites Check ===
+call PrerequisitesCheck
+
+; === delete ONT first ===
+if op_mode >= 1 then
+	dataFinishSteps=6
+	call deleteDataService
+	iptvFinishSteps=8
+	call deleteIpevService
+	voipFinishSteps=6
+	call deleteVoipService
+	finishSteps=1
+	call deleteONT
+	if op_mode == 1 goto normalExit
+endif
+
+; === add ONT ===
+call addONT
+
+; === add IPTV Service ===
+call addIptvService
+
+; === add Data Service ===
+call addDataService
+
+; === add VoIP Service ===
+call addVoipService
+
+; === show ONT information
+sprintf2 cmdMsg "display ont info %d %d %d %d" oltDownlinkFrameID oltDownlinkSlotID oltDownlinkPortID ont_id
+sendln cmdMsg
+wait PROMPT_CFG_MODE
+
+; !!!! Program STOP !!!!
+goto normalExit
+
+
+:addONT
+	call enterCfgGponMode
+	; specify ONT Port/ID
+	sprintf2 cmdMsg "ont add %d %d" oltDownlinkPortID ont_id
+	; specify authentication type
+	if ont_auth_type == 0 || ont_auth_type == 2 then
+		sprintf2 cmdMsg '%s sn-auth "%s"' cmdMsg pon_sn
+	endif
+	if ont_auth_type <> 0 then
+		if ont_auth_type == 3 then
+			sprintf2 cmdMsg '%s sn-or-password-auth "%s" password' cmdMsg pon_sn
+		else
+			; ont_auth_type == 1 || ont_auth_type == 2
+			sprintf2 cmdMsg '%s password-auth' cmdMsg
+		endif
+		strlen ploam_passwd_str
+		if result <> 0 then
+			sprintf2 cmdMsg '%s %s' cmdMsg ploam_passwd_str
+		else
+			sprintf2 cmdMsg '%s hex %s' cmdMsg ploam_passwd_hex
+		endif
+		if ont_auth_type == 1 then
+			sprintf2 cmdMsg '%s  always-on' cmdMsg
+		endif
+	endif
+	send cmdMsg
+	; specify ONT profile/Description
+	sprintf2 cmdMsg ' profile-name %s manage-mode omci ont-type %s desc "%s"' ont_profile ont_speedStr ont_desc
+	timeout=5
+	sendln cmdMsg
+	wait CMD_RESPONSE_FAILURE CMD_RESPONSE_WRONG waitMsg
+	if result <> 3 then
+		sprintf2 errMsg "Fail to add ONT, please to check your configuration file!"
+		goto errExit
+	endif
+	; add ONT successfully
+	finishSteps=finishSteps+1
+	; change DBA profile for tcont#0 (for OMCI; DBA type:fixed, id=1 is default setting for HUAWEI OLT)
+	sprintf2 cmdMsg "tcont modify-profile %d %d 0 profile-id %d" oltDownlinkPortID ont_id tcont0_dba_id
+	timeout=5
+	sendln cmdMsg
+	wait "repeatedly" "succeeded" CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+	tmpVal=result
+	call back2CfgMode
+	if tmpVal <> 1 && tmpVal <> 2 then
+		errMsg="Fail to change DBA profile of TCONT0"
+		goto errExit
+	endif
+	logwrite #13#10#13#10#9'ONT Added'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:deleteONT
+	deleteONTfailed=0
+	if finishSteps <= 0 goto exitDeleteONT
+	call enterCfgGponMode
+	finishSteps=0
+	; delete ONT
+	sprintf2 cmdMsg "ont delete %d %d" oltDownlinkPortID ont_id
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "success"
+	tmpVal=result
+	call back2CfgMode
+	if tmpVal <> 3 then
+		sprintf2 errMsg "Fail to delete ONT, remaining steps: %d" finishSteps
+		call askErrExit
+		deleteONTfailed=1
+	endif
+	finishSteps = finishSteps - 1
+	if deleteONTfailed == 0 logwrite #13#10#13#10#9'ONT Deleted'#13#10#13#10
+	sendln
+:exitDeleteONT
+	result=0
+return
+
+
+:addIptvService
+	if iptvServiceEnabled == 0 return
+	call enterCfgGponMode
+	; 1. setup TCONT for iptv service
+	strlen iptv_dba_profile
+	if result <> 0 then
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-name "%s"' oltDownlinkPortID ont_id iptv_tcont_id iptv_dba_profile
+	else
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-id %d' oltDownlinkPortID ont_id iptv_tcont_id iptv_dba_profile_id
+	endif
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+	if result <> 3 then
+		errMsg="Fail to bind DBA profile for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; 2. setup GEM port for iptv service
+	sprintf2 cmdMsg 'gemport add %d gemportid %d %s encrypt %s' oltDownlinkPortID iptv_gemport_id iptv_service_type iptv_gemport_encrypt
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded"
+	if result <> 3 then
+		errMsg="Fail to add GEM port for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; 3. bind GEM port
+	sprintf2 cmdMsg "ont gemport bind %d %d %d %d priority-queue %d" oltDownlinkPortID ont_id iptv_gemport_id iptv_tcont_id iptv_pqn
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to bind GEM port for TCONT of ipav service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; 4. GEM port mapping
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id iptv_gemport_id iptv_uni_vlan_id
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to map(VLAN) GEM port for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; 5. setup ONT port VLAN for iptv service
+	if ont_eth_ports > 1 then
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports iptv_uni_vlan_id
+	else
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id iptv_uni_vlan_id
+	endif
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+	if result <> 3 then
+		errMsg="Fail to setup ONT port(VLAN) for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; 6. multicast-forward
+	timeout=1
+	sprintf2 cmdMsg "ont multicast-forward %d %d tag translation %d" oltDownlinkPortID ont_id iptv_uni_vlan_id
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+	if result <> 0 then
+		errMsg="Fail to setup ONT multicast-forward mode for iptv service!"
+		goto errExit
+	endif
+	timeout=0
+	iptvFinishSteps = iptvFinishSteps + 1
+	call back2CfgMode
+	; 7. create service port
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" iptv_port_id iptv_ani_vlan_id olt_downlinkStr iptv_gemport_id iptv_uni_vlan_id
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to create service port for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; setup description of service-port for iptv service
+	strlen iptv_port_desc
+	if result == 0 then
+		sprintf2 iptv_port_desc "ONT-%s-%d-gem%d-iptvService" olt_downlinkStr ont_id iptv_gemport_id
+	endif
+	sprintf2 cmdMsg 'service-port desc %d description "%s"' iptv_port_id iptv_port_desc
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to setup description of service port for iptv service!"
+		goto errExit
+	endif
+	; change to BTV mode
+	sendln "btv"
+	wait PROMPT_BTV_MODE
+	; 8. igmp user add by service-port
+	sprintf2 cmdMsg "igmp user add service-port %d auth max-program %d" iptv_port_id iptv_max_program
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_FAILURE PROMPT_BTV_MODE
+	if result <> 2 then
+		call back2CfgMode
+		errMsg="igmp user add failed for iptv service!"
+		goto errExit
+	endif
+	iptvFinishSteps = iptvFinishSteps + 1
+	; igmp multicast-vlan member
+	call addMulticastVlanMember
+	; bind igmp profile
+	setsync 1
+	sprintf2 cmdMsg "igmp user bind-profile service-port %d profile-index-list %s" iptv_port_id iptv_igmp_profile_list
+	sendln cmdMsg
+	tmpVal=0
+	while tmpVal<4
+	  recvln
+	  tmpVal = tmpVal + 1
+	  if tmpVal > 2 then
+		strscan inputstr "failure: 0"
+		if result == 0 then
+			setsync 0
+			call back2CfgMode
+			errMsg = "Wrong value of IPTV_IGMP_PROFILE_LIST, please update your configuratin file!"
+			goto errExit
+		endif
+	  endif
+	endwhile
+	; enter asynchronous mode
+	setsync 0
+	call back2CfgMode
+:addIptvServiceExit
+	logwrite #13#10#13#10#9'IPTV Service Added'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:deleteIpevService
+	deleteIptvServiceFailed=0
+	if iptvFinishSteps <=0 goto exitDeleteIptvService
+	tmpStr="Fail to delete iptv service"
+	while iptvFinishSteps >= 7
+		if iptvFinishSteps == 8 then
+			sendln "btv"
+			wait PROMPT_BTV_MODE
+			sprintf2 cmdMsg "igmp user delete service-port %d" iptv_port_id
+			sendln cmdMsg
+			wait PROMPT_YES_NO CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "Fail to delete igmp user for iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			else
+				sendln "y"
+				wait PROMPT_BTV_MODE
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+			call back2CfgMode
+			sprintf2 cmdMsg "undo bind ip service-port %d all" iptv_port_id
+			sendln cmdMsg
+			wait PROMPT_CFG_MODE
+		endif
+		if iptvFinishSteps == 7 then
+			timeout=1
+			sprintf2 cmdMsg "undo service-port %d" iptv_port_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+			if result <> 0 then
+				sprintf2 errMsg "Fail to delete service port of iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+			timeout=0
+		endif
+	endwhile
+	call enterCfgGponMode
+	while iptvFinishSteps > 0
+		if iptvFinishSteps == 6 then
+			timeout=1
+			sprintf2 cmdMsg "ont multicast-forward %d %d unconcern" oltDownlinkPortID ont_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+			if result <> 0 then
+				sprintf2 errMsg "Fail to unset multicast-forward for iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			timeout=0
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+		if iptvFinishSteps == 5 then
+			if ont_eth_ports > 1 then
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports
+			else
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id iptv_uni_vlan_id
+			endif
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unset ONT port(VLAN) for iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+		if iptvFinishSteps == 4 then
+			sprintf2 cmdMsg "undo ont gemport mapping %d %d %d" oltDownlinkPortID ont_id iptv_gemport_id
+			sendln cmdMsg
+			call waitCR
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unmapping(VLAN) GEM port for iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+		if iptvFinishSteps == 3 then
+			sprintf2 cmdMsg "undo ont gemport bind %d %d %d" oltDownlinkPortID ont_id iptv_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding GEM port for TCONT of iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+		if iptvFinishSteps == 2 then
+			sprintf2 cmdMsg "gemport delete %d gemportid %d" oltDownlinkPortID iptv_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to delete GEM port for iptv service, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+		if iptvFinishSteps == 1 then
+			sprintf2 cmdMsg "undo tcont bind-profile %d %d %d" oltDownlinkPortID ont_id iptv_tcont_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "unbinding DBA-profile: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding profile, remaining steps: %d" iptvFinishSteps
+				call askErrExit
+				deleteIptvServiceFailed=1
+			endif
+			iptvFinishSteps = iptvFinishSteps - 1
+		endif
+	endwhile
+	call back2CfgMode
+	if deleteIptvServiceFailed == 0 then
+		logwrite #13#10#13#10#9'IPTV Service Deleted'#13#10#13#10
+		sendln
+	endif
+:exitDeleteIptvService
+	result = deleteIptvServiceFailed
+return
+
+
+:addDataService
+	if dataServiceEnabled == 0 return
+	call enterCfgGponMode
+	; 1. setup TCONT for data service
+	strlen data_dba_profile
+	if result <> 0 then
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-name "%s"' oltDownlinkPortID ont_id data_tcont_id data_dba_profile
+	else
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-id %d' oltDownlinkPortID ont_id data_tcont_id data_dba_profile_id
+	endif
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+	if result <> 3 then
+		errMsg="Fail to bind DBA profile for data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	; 2. setup GEM port for data service
+	sprintf2 cmdMsg 'gemport add %d gemportid %d %s encrypt %s' oltDownlinkPortID data_gemport_id data_service_type data_gemport_encrypt
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded"
+	if result <> 3 then
+		errMsg="Fail to add GEM port for data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	; 3. bind GEM port
+	sprintf2 cmdMsg "ont gemport bind %d %d %d %d priority-queue %d" oltDownlinkPortID ont_id data_gemport_id data_tcont_id data_pqn
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to bind GEM port for TCONT of data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	; 4. GEM port mapping
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id data_gemport_id data_uni_vlan_id
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to map(VLAN) GEM port for data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	; 5. setup ONT port VLAN for data service
+	if ont_eth_ports > 1 then
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports data_uni_vlan_id
+	else
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id data_uni_vlan_id
+	endif
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+	if result <> 3 then
+		errMsg="Fail to setup ONT port(VLAN) for data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	call back2CfgMode
+	; 6. create service port
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" data_port_id data_ani_vlan_id olt_downlinkStr data_gemport_id data_uni_vlan_id
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to create service port for data service!"
+		goto errExit
+	endif
+	dataFinishSteps = dataFinishSteps + 1
+	; setup description of service-port
+	strlen data_port_desc
+	if result == 0 then
+		sprintf2 data_port_desc "ONT-%s-%d-gem%d-dataService" olt_downlinkStr ont_id data_gemport_id
+	endif
+	sprintf2 cmdMsg 'service-port desc %d description "%s"' data_port_id data_port_desc
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to setup description of service port for data service!"
+		goto errExit
+	endif
+	; setup maximum connections of service port
+	sprintf2 cmdMsg "mac-address max-mac-count service-port %d %d" data_port_id data_max_connection
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to setup maximum connections of service port for data service!"
+		goto errExit
+	endif
+:addDataServiceExit
+	logwrite #13#10#13#10#9'Data Service Added'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:deleteDataService
+	deleteDataServiceFailed=0
+	if dataFinishSteps <=0 goto exitDeleteDataService
+	tmpStr="Fail to delete data service"
+	if dataFinishSteps == 6 then
+		timeout=1
+		sprintf2 cmdMsg "undo service-port %d" data_port_id
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+		if result <> 0 then
+			sprintf2 errMsg "Fail to delete service port of data service, remaining steps: %d" dataFinishSteps
+			call askErrExit
+			deleteDataServiceFailed=1
+		endif
+		dataFinishSteps = dataFinishSteps - 1
+		timeout=0
+	endif
+	call enterCfgGponMode
+	while dataFinishSteps > 0
+		if dataFinishSteps == 1 then
+			sprintf2 cmdMsg "undo tcont bind-profile %d %d %d" oltDownlinkPortID ont_id data_tcont_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "unbinding DBA-profile: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding profile, remaining steps: %d" dataFinishSteps
+				call askErrExit
+				deleteDataServiceFailed=1
+			endif
+			dataFinishSteps = dataFinishSteps - 1
+		endif
+		if dataFinishSteps == 2 then
+			sprintf2 cmdMsg "gemport delete %d gemportid %d" oltDownlinkPortID data_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to delete GEM port for data service, remaining steps: %d" dataFinishSteps
+				call askErrExit
+				deleteDataServiceFailed=1
+			endif
+			dataFinishSteps = dataFinishSteps - 1
+		endif
+		if dataFinishSteps == 3 then
+			sprintf2 cmdMsg "undo ont gemport bind %d %d %d" oltDownlinkPortID ont_id data_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding GEM port for TCONT of data service, remaining steps: %d" dataFinishSteps
+				call askErrExit
+				deleteDataServiceFailed=1
+			endif
+			dataFinishSteps = dataFinishSteps - 1
+		endif
+		if dataFinishSteps == 4 then
+			sprintf2 cmdMsg "undo ont gemport mapping %d %d %d" oltDownlinkPortID ont_id data_gemport_id
+			sendln cmdMsg
+			call waitCR
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unmapping(VLAN) GEM port for data service, remaining steps: %d" dataFinishSteps
+				call askErrExit
+				deleteDataServiceFailed=1
+			endif
+			dataFinishSteps = dataFinishSteps - 1
+		endif
+		if dataFinishSteps == 5 then
+			if ont_eth_ports > 1 then
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports
+			else
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id data_uni_vlan_id
+			endif
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unset ONT port(VLAN) for data service, remaining steps: %d" dataFinishSteps
+				call askErrExit
+				deleteDataServiceFailed=1
+			endif
+			dataFinishSteps = dataFinishSteps - 1
+		endif
+	endwhile
+	call back2CfgMode
+	if deleteDataServiceFailed == 0 then
+		logwrite #13#10#13#10#9'Data Service Deleted'#13#10#13#10
+		sendln
+	endif
+:exitDeleteDataService
+	result = deleteDataServiceFailed
+return
+
+
+:addVoipService
+	if voipServiceEnabled == 0 return
+	call enterCfgGponMode
+	; 1. setup TCONT for voip service
+	strlen voip_dba_profile
+	if result <> 0 then
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-name "%s"' oltDownlinkPortID ont_id voip_tcont_id voip_dba_profile
+	else
+		sprintf2 cmdMsg 'tcont bind-profile %d %d %d profile-id %d' oltDownlinkPortID ont_id voip_tcont_id voip_dba_profile_id
+	endif
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+	if result <> 3 then
+		errMsg="Fail to bind DBA profile for voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	; 2. setup GEM port for voip service
+	sprintf2 cmdMsg 'gemport add %d gemportid %d %s encrypt %s' oltDownlinkPortID voip_gemport_id voip_service_type voip_gemport_encrypt
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded"
+	if result <> 3 then
+		errMsg="Fail to add GEM port for voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	; 3. bind GEM port
+	sprintf2 cmdMsg "ont gemport bind %d %d %d %d priority-queue %d" oltDownlinkPortID ont_id voip_gemport_id voip_tcont_id voip_pqn
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to bind GEM port for TCONT of voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	; 4. GEM port mapping
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id voip_gemport_id voip_uni_vlan_id
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+	if result <> 3 then
+		errMsg="Fail to map(VLAN) GEM port for voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	; 5. setup ONT port VLAN for voip service
+	if ont_eth_ports > 1 then
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports voip_uni_vlan_id
+	else
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id voip_uni_vlan_id
+	endif
+	sendln cmdMsg
+	call waitCR
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+	if result <> 3 then
+		errMsg="Fail to setup ONT port(VLAN) for voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	call back2CfgMode
+	; 6. create service port
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" voip_port_id voip_ani_vlan_id olt_downlinkStr voip_gemport_id voip_uni_vlan_id
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to create service port for voip service!"
+		goto errExit
+	endif
+	voipFinishSteps = voipFinishSteps + 1
+	; setup description of service-port
+	strlen voip_port_desc
+	if result == 0 then
+		sprintf2 voip_port_desc "ONT-%s-%d-gem%d-dataService" olt_downlinkStr ont_id voip_gemport_id
+	endif
+	sprintf2 cmdMsg 'service-port desc %d description "%s"' voip_port_id voip_port_desc
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to setup description of service port for voip service!"
+		goto errExit
+	endif
+	; setup maximum connections of service port
+	sprintf2 cmdMsg "mac-address max-mac-count service-port %d %d" voip_port_id voip_max_connection
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
+	if result <> 3 then
+		errMsg="Fail to setup maximum connections of service port for voip service!"
+		goto errExit
+	endif
+:addVoipServiceExit
+	logwrite #13#10#13#10#9'VoIP Service Added'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:deleteVoipService
+	deleteVoipServiceFailed=0
+	if voipFinishSteps <=0 goto exitDeleteVoipService
+	tmpStr="Fail to delete voip service"
+	if voipFinishSteps == 6 then
+		timeout=1
+		sprintf2 cmdMsg "undo service-port %d" voip_port_id
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+		if result <> 0 then
+			sprintf2 errMsg "Fail to delete service port of voip service, remaining steps: %d" voipFinishSteps
+			call askErrExit
+			deleteVoipServiceFailed=1
+		endif
+		voipFinishSteps = voipFinishSteps - 1
+		timeout=0
+	endif
+	call enterCfgGponMode
+	while voipFinishSteps > 0
+		if voipFinishSteps == 1 then
+			sprintf2 cmdMsg "undo tcont bind-profile %d %d %d" oltDownlinkPortID ont_id voip_tcont_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "unbinding DBA-profile: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding profile, remaining steps: %d" voipFinishSteps
+				call askErrExit
+				deleteVoipServiceFailed=1
+			endif
+			voipFinishSteps = voipFinishSteps - 1
+		endif
+		if voipFinishSteps == 2 then
+			sprintf2 cmdMsg "gemport delete %d gemportid %d" oltDownlinkPortID voip_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded: 1"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to delete GEM port for voip service, remaining steps: %d" voipFinishSteps
+				call askErrExit
+				deleteVoipServiceFailed=1
+			endif
+			voipFinishSteps = voipFinishSteps - 1
+		endif
+		if voipFinishSteps == 3 then
+			sprintf2 cmdMsg "undo ont gemport bind %d %d %d" oltDownlinkPortID ont_id voip_gemport_id
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unbinding GEM port for TCONT of voip service, remaining steps: %d" voipFinishSteps
+				call askErrExit
+				deleteVoipServiceFailed=1
+			endif
+			voipFinishSteps = voipFinishSteps - 1
+		endif
+		if voipFinishSteps == 4 then
+			sprintf2 cmdMsg "undo ont gemport mapping %d %d %d" oltDownlinkPortID ont_id voip_gemport_id
+			sendln cmdMsg
+			call waitCR
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unmapping(VLAN) GEM port for voip service, remaining steps: %d" voipFinishSteps
+				call askErrExit
+				deleteVoipServiceFailed=1
+			endif
+			voipFinishSteps = voipFinishSteps - 1
+		endif
+		if voipFinishSteps == 5 then
+			if ont_eth_ports > 1 then
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports
+			else
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id voip_uni_vlan_id
+			endif
+			sendln cmdMsg
+			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
+			if result <> 3 then
+				sprintf2 errMsg "Fail to unset ONT port(VLAN) for voip service, remaining steps: %d" voipFinishSteps
+				call askErrExit
+				deleteVoipServiceFailed=1
+			endif
+			voipFinishSteps = voipFinishSteps - 1
+		endif
+	endwhile
+	call back2CfgMode
+	if deleteVoipServiceFailed == 0 then
+		logwrite #13#10#13#10#9'VoIP Service Deleted'#13#10#13#10
+		sendln
+	endif
+:exitDeleteVoipService
+	result = deleteVoipServiceFailed
+return
+
+
+:addMulticastVlanMember
+	tmpInStr=iptv_multicast_vlan_list
+	strlen tmpInStr
+	while result > 0
+		strscan tmpInStr ","
+		if result <> 0 then
+			tmpPosVal=result
+			if tmpPosVal > 1 then
+				strcopy tmpInStr 1 tmpPosVal-1 tmpStr
+				str2int tmpVal tmpStr
+			endif
+			strremove tmpInStr 1 tmpPosVal
+			if tmpPosVal == 1 then
+				strlen tmpInStr
+				continue
+			endif
+		else
+			str2int tmpVal tmpInStr
+			tmpInStr=""
+		endif
+		sprintf2 waitMsg "(config-mvlan%d)#" tmpVal
+		sprintf2 cmdMsg "multicast-vlan %d" tmpVal
+		sendln cmdMsg
+		wait waitMsg CMD_RESPONSE_FAILURE CMD_RESPONSE_WRONG
+		if result <> 1 then
+			errMsg = "Wrong value of IPTV_MULTICAST_VLAN_LIST, update your configuration file!"
+			goto errMsg
+		endif
+		sprintf2 cmdMsg "igmp multicast-vlan member service-port %d" iptv_port_id
+		sendln cmdMsg
+		wait waitMsg
+		strlen tmpInStr
+	endwhile
+	; back to "btv"
+	sendln "btv"
+	wait PROMPT_BTV_MODE
+	result=0
+return
+
+
+:chkCfgMode
+	sendln "diagnose"
+	wait PROMPT_DIAG_MODE
+	timeout=5
+	sendln "display xpon mode"
+	call waitCR
+	wait "distributing-mode" PROMPT_DIAG_MODE
+	if result <> 1 then
+		errMsg="Configuration mode is not 'distributing-mode'"
+		goto errExit
+	endif
+	sendln "config"
+	wait PROMPT_CFG_MODE
+	timeout=0
+	result=0
+return
+
+
+:parseCfgFile
+	fileopen fd cfgFile 0 1
+	lineNo=0
+	while 1
+		filereadln fd lineStr
+		;--- break loop if EOF
+		if result == 1 break
+
+		lineNo=lineNo+1
+		backupOrigLineStr=lineStr
+		;--- remove leading and trailing whitespace
+		strtrim lineStr ' '
+		;--- ignore empty/null string
+		strlen lineStr
+		if result == 0 then
+			continue
+		endif
+		;--- ignore comment
+		strcopy lineStr 1 1 tmpStr
+		strcompare tmpStr ";"
+		if result == 0 then
+			continue
+		endif
+		;dispstr #10#13 "line: " lineStr #10#13
+		strsplit lineStr '=' 2
+		if result <> 2 then
+			fileclose fd
+			sprintf2 errMsg "Wrong format at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+		;--- remove leading and trailing whitespace, to get key(groupmatchstr1) and value(groupmatchstr2)
+		strtrim groupmatchstr1 ' '
+		strtrim groupmatchstr2 ' '
+		;--- it will cause file open failed if not remove double quotes '"' from string of filename
+		strtrim groupmatchstr2 '"'
+		;dispstr #10#13 "key=" groupmatchstr1 " value=" groupmatchstr2 #10#13
+		strlen groupmatchstr2
+		if result == 0 then
+			fileclose fd
+			sprintf2 errMsg "Wrong setting at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+
+		;--- parse parameters (key=OP_MODE, op_mode=value)
+		strcompare groupmatchstr1 "OP_MODE"
+		if result == 0 then
+			str2int op_mode groupmatchstr2
+			int2str tmpStr op_mode
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || op_mode < 0 || op_mode > 2 then
+				errMsg="Wrong value of 'OP_MODE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=LOG_FILE, log_file=value)
+		strcompare groupmatchstr1 "LOG_FILE"
+		if result == 0 then
+			log_file=groupmatchstr2
+			call updateLogFileName
+			if result <> 0 then
+				sprintf2 errMsg "Wrong format of log filename:\n\n   '%s'" log_file
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_IPv4, olt_ip=value)
+		strcompare groupmatchstr1 "OLT_MGM_IPv4"
+		if result == 0 then
+			olt_ip=groupmatchstr2
+			tmpStr=groupmatchstr2
+			call checkIPv4
+			if result <> 0 then
+				errMsg="Wrong format of 'OLT_MGM_IPv4'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_USER, olt_user=value)
+		strcompare groupmatchstr1 "OLT_MGM_USER"
+		if result == 0 then
+			olt_user=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_PASSWD, olt_passwd=value)
+		strcompare groupmatchstr1 "OLT_MGM_PASSWD"
+		if result == 0 then
+			olt_passwd=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_UPLINK_PORT, olt_uplinkStr=value, oltUplinkFrameID, oltUplinkSlotID, oltUplinkPortID)
+		strcompare groupmatchstr1 "OLT_UPLINK_PORT"
+		if result == 0 then
+			olt_uplinkStr=groupmatchstr2
+			tmpStr=groupmatchstr2
+			call oltPortFmtCheck
+			if result <> 0 then
+				errMsg="Wrong setting of 'OLT_UPLINK_PORT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			strsplit olt_uplinkStr "/"
+			str2int oltUplinkFrameID groupmatchstr1
+			str2int oltUplinkSlotID groupmatchstr2
+			str2int oltUplinkPortID  groupmatchstr3
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_DOWNLINK_PORT, olt_downlinkStr=value, oltDownlinkFrameID, oltDownlinkSlotID, oltDownlinkPortID)
+		strcompare groupmatchstr1 "OLT_DOWNLINK_PORT"
+		if result == 0 then
+			olt_downlinkStr=groupmatchstr2
+			tmpStr=groupmatchstr2
+			call oltPortFmtCheck
+			if result <> 0 then
+				errMsg="Wrong setting of 'OLT_DOWNLINK_PORT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			strsplit olt_downlinkStr "/"
+			str2int oltDownlinkFrameID groupmatchstr1
+			str2int oltDownlinkSlotID groupmatchstr2
+			str2int oltDownlinkPortID  groupmatchstr3
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_ID, ont_id=value)
+		strcompare groupmatchstr1 "ONT_ID"
+		if result == 0 then
+			str2int ont_id groupmatchstr2
+			int2str tmpStr ont_id
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || ont_id < 0 then
+				errMsg="Wrong value of 'ONT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=PON_SERIAL_NUMBER, pon_sn=value)
+		strcompare groupmatchstr1 "PON_SERIAL_NUMBER"
+		if result == 0 then
+			pon_sn = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_SPEED, ont_speedStr=value)
+		strcompare groupmatchstr1 "ONT_SPEED"
+		if result == 0 then
+			ont_speedStr = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_PROFILE, ont_profile=value)
+		strcompare groupmatchstr1 "ONT_PROFILE"
+		if result == 0 then
+			ont_profile = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_AUTH_TYPE, ont_auth_type=value)
+		strcompare groupmatchstr1 "ONT_AUTH_TYPE"
+		if result == 0 then
+			str2int ont_auth_type groupmatchstr2
+			int2str tmpStr ont_auth_type
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || ont_auth_type < 0 || ont_auth_type > 3 then
+				errMsg="Wrong value of 'ONT_AUTH_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=PLOAM_PASSWD_STR, ploam_passwd_str=value)
+		strcompare groupmatchstr1 "PLOAM_PASSWD_STR"
+		if result == 0 then
+			ploam_passwd_str = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=PLOAM_PASSWD_HEX, ploam_passwd_hex=value)
+		strcompare groupmatchstr1 "PLOAM_PASSWD_HEX"
+		if result == 0 then
+			ploam_passwd_hex = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_DESC, ont_desc=value)
+		strcompare groupmatchstr1 "ONT_DESC"
+		if result == 0 then
+			ont_desc = groupmatchstr2
+			continue
+		endif
+		
+		;--- parse parameters (key=TCONT0_DBA_PROFILE_ID, tcont0_dba_id=value)
+		strcompare groupmatchstr1 "TCONT0_DBA_PROFILE_ID"
+		if result == 0 then
+			str2int tcont0_dba_id groupmatchstr2
+			int2str tmpStr tcont0_dba_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || tcont0_dba_id < 0 then
+				errMsg="Wrong value of 'TCONT0_DBA_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+		
+		;--- parse parameters (key=ONT_ETH_PORTS, ont_eth_ports=value)
+		strcompare groupmatchstr1 "ONT_ETH_PORTS"
+		if result == 0 then
+			str2int ont_eth_ports groupmatchstr2
+			int2str tmpStr ont_eth_ports
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || ont_eth_ports < 1 then
+				errMsg="Wrong value of 'ONT_ETH_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_SERVICE_ENABLED, dataServiceEnabled=value)
+		strcompare groupmatchstr1 "DATA_SERVICE_ENABLED"
+		if result == 0 then
+			str2int dataServiceEnabled groupmatchstr2
+			int2str tmpStr dataServiceEnabled
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || dataServiceEnabled<0 || dataServiceEnabled>1 then
+				errMsg="Wrong value of 'DATA_SERVICE_ENABLED'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_TCONT_ID, data_tcont_id=value)
+		strcompare groupmatchstr1 "DATA_TCONT_ID"
+		if result == 0 then
+			str2int data_tcont_id groupmatchstr2
+			int2str tmpStr data_tcont_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_tcont_id < 0 then
+				errMsg="Wrong value of 'DATA_TCONT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_DBA_PROFILE_NAME, data_dba_profile=value)
+		strcompare groupmatchstr1 "DATA_DBA_PROFILE_NAME"
+		if result == 0 then
+			data_dba_profile = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_DBA_PROFILE_ID, data_dba_profile_id=value)
+		strcompare groupmatchstr1 "DATA_DBA_PROFILE_ID"
+		if result == 0 then
+			str2int data_dba_profile_id groupmatchstr2
+			int2str tmpStr data_dba_profile_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_dba_profile_id < 0 then
+				errMsg="Wrong value of 'DATA_DBA_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_GEMPORT_ID, data_gemport_id=value)
+		strcompare groupmatchstr1 "DATA_GEMPORT_ID"
+		if result == 0 then
+			str2int data_gemport_id groupmatchstr2
+			int2str tmpStr data_gemport_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'DATA_GEMPORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_SERVICE_TYPE, data_service_type=value)
+		strcompare groupmatchstr1 "DATA_SERVICE_TYPE"
+		if result == 0 then
+			data_service_type = groupmatchstr2
+			tolower data_service_type data_service_type
+			strcompare data_service_type "tdm"
+			tmpVal = result
+			strcompare data_service_type "eth"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'DATA_SERVICE_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_GEMPORT_ENCRYPT, data_gemport_encrypt=value)
+		strcompare groupmatchstr1 "DATA_GEMPORT_ENCRYPT"
+		if result == 0 then
+			data_gemport_encrypt = groupmatchstr2
+			tolower data_gemport_encrypt data_gemport_encrypt
+			strcompare data_gemport_encrypt "off"
+			tmpVal = result
+			strcompare data_gemport_encrypt "on"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'DATA_GEMPORT_ENCRYPT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_PQN, data_pqn=value)
+		strcompare groupmatchstr1 "DATA_PQN"
+		if result == 0 then
+			str2int data_pqn groupmatchstr2
+			int2str tmpStr data_pqn
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_pqn < 0 then
+				errMsg="Wrong value of 'DATA_PQN'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_UNI_VLAN_ID, data_uni_vlan_id=value)
+		strcompare groupmatchstr1 "DATA_UNI_VLAN_ID"
+		if result == 0 then
+			str2int data_uni_vlan_id groupmatchstr2
+			int2str tmpStr data_uni_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_uni_vlan_id < 0 then
+				errMsg="Wrong value of 'DATA_UNI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_ANI_VLAN_ID, data_ani_vlan_id=value)
+		strcompare groupmatchstr1 "DATA_ANI_VLAN_ID"
+		if result == 0 then
+			str2int data_ani_vlan_id groupmatchstr2
+			int2str tmpStr data_ani_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_ani_vlan_id < 0 then
+				errMsg="Wrong value of 'DATA_ANI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_SERVICE_PORT_ID, data_port_id=value)
+		strcompare groupmatchstr1 "DATA_SERVICE_PORT_ID"
+		if result == 0 then
+			str2int data_port_id groupmatchstr2
+			int2str tmpStr data_port_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'DATA_SERVICE_PORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_SERVICE_PORT_DESC, data_port_desc=value)
+		strcompare groupmatchstr1 "DATA_SERVICE_PORT_DESC"
+		if result == 0 then
+			data_port_desc = groupmatchstr2
+			strlen data_port_desc
+			if result > 64 then
+				errMsg="Wrong setting of 'DATA_SERVICE_PORT_DESC'(maximum length is 64)\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_MAX_CONNECTION, data_max_connection=value)
+		strcompare groupmatchstr1 "DATA_MAX_CONNECTION"
+		if result == 0 then
+			str2int data_max_connection groupmatchstr2
+			int2str tmpStr data_max_connection
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_max_connection < 1 then
+				errMsg="Wrong value of 'DATA_MAX_CONNECTION'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_SERVICE_ENABLED, iptvServiceEnabled=value)
+		strcompare groupmatchstr1 "IPTV_SERVICE_ENABLED"
+		if result == 0 then
+			str2int iptvServiceEnabled groupmatchstr2
+			int2str tmpStr iptvServiceEnabled
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptvServiceEnabled<0 || iptvServiceEnabled>1 then
+				errMsg="Wrong value of 'IPTV_SERVICE_ENABLED'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_TCONT_ID, iptv_tcont_id=value)
+		strcompare groupmatchstr1 "IPTV_TCONT_ID"
+		if result == 0 then
+			str2int iptv_tcont_id groupmatchstr2
+			int2str tmpStr iptv_tcont_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_tcont_id < 0 then
+				errMsg="Wrong value of 'IPTV_TCONT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_DBA_PROFILE_NAME, iptv_dba_profile=value)
+		strcompare groupmatchstr1 "IPTV_DBA_PROFILE_NAME"
+		if result == 0 then
+			iptv_dba_profile = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_DBA_PROFILE_ID, iptv_dba_profile_id=value)
+		strcompare groupmatchstr1 "IPTV_DBA_PROFILE_ID"
+		if result == 0 then
+			str2int iptv_dba_profile_id groupmatchstr2
+			int2str tmpStr iptv_dba_profile_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_dba_profile_id < 0 then
+				errMsg="Wrong value of 'IPTV_DBA_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_GEMPORT_ID, iptv_gemport_id=value)
+		strcompare groupmatchstr1 "IPTV_GEMPORT_ID"
+		if result == 0 then
+			str2int iptv_gemport_id groupmatchstr2
+			int2str tmpStr iptv_gemport_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'IPTV_GEMPORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_SERVICE_TYPE, iptv_service_type=value)
+		strcompare groupmatchstr1 "IPTV_SERVICE_TYPE"
+		if result == 0 then
+			iptv_service_type = groupmatchstr2
+			tolower iptv_service_type iptv_service_type
+			strcompare iptv_service_type "tdm"
+			tmpVal = result
+			strcompare iptv_service_type "eth"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'IPTV_SERVICE_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_GEMPORT_ENCRYPT, iptv_gemport_encrypt=value)
+		strcompare groupmatchstr1 "IPTV_GEMPORT_ENCRYPT"
+		if result == 0 then
+			iptv_gemport_encrypt = groupmatchstr2
+			tolower iptv_gemport_encrypt iptv_gemport_encrypt
+			strcompare iptv_gemport_encrypt "off"
+			tmpVal = result
+			strcompare iptv_gemport_encrypt "on"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'IPTV_GEMPORT_ENCRYPT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_PQN, iptv_pqn=value)
+		strcompare groupmatchstr1 "IPTV_PQN"
+		if result == 0 then
+			str2int iptv_pqn groupmatchstr2
+			int2str tmpStr iptv_pqn
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_pqn < 0 then
+				errMsg="Wrong value of 'IPTV_PQN'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_UNI_VLAN_ID, iptv_uni_vlan_id=value)
+		strcompare groupmatchstr1 "IPTV_UNI_VLAN_ID"
+		if result == 0 then
+			str2int iptv_uni_vlan_id groupmatchstr2
+			int2str tmpStr iptv_uni_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_uni_vlan_id < 0 then
+				errMsg="Wrong value of 'IPTV_UNI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_ANI_VLAN_ID, iptv_ani_vlan_id=value)
+		strcompare groupmatchstr1 "IPTV_ANI_VLAN_ID"
+		if result == 0 then
+			str2int iptv_ani_vlan_id groupmatchstr2
+			int2str tmpStr iptv_ani_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_ani_vlan_id < 0 then
+				errMsg="Wrong value of 'IPTV_ANI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_SERVICE_PORT_ID, iptv_port_id=value)
+		strcompare groupmatchstr1 "IPTV_SERVICE_PORT_ID"
+		if result == 0 then
+			str2int iptv_port_id groupmatchstr2
+			int2str tmpStr iptv_port_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'IPTV_SERVICE_PORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_SERVICE_PORT_DESC, iptv_port_desc=value)
+		strcompare groupmatchstr1 "IPTV_SERVICE_PORT_DESC"
+		if result == 0 then
+			iptv_port_desc = groupmatchstr2
+			strlen iptv_port_desc
+			if result > 64 then
+				errMsg="Wrong setting of 'IPTV_SERVICE_PORT_DESC'(maximum length is 64)\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_MAX_PROGRAM, iptv_max_program=value)
+		strcompare groupmatchstr1 "IPTV_MAX_PROGRAM"
+		if result == 0 then
+			str2int iptv_max_program groupmatchstr2
+			int2str tmpStr iptv_max_program
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_max_program<1 then
+				errMsg="Wrong value of 'IPTV_MAX_PROGRAM'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_MULTICAST_VLAN_LIST, iptv_multicast_vlan_list=value)
+		strcompare groupmatchstr1 "IPTV_MULTICAST_VLAN_LIST"
+		if result == 0 then
+			iptv_multicast_vlan_list = groupmatchstr2
+		endif
+		
+		;--- parse parameters (key=IPTV_IGMP_PROFILE_LIST, iptv_igmp_profile_list=value)
+		strcompare groupmatchstr1 "IPTV_IGMP_PROFILE_LIST"
+		if result == 0 then
+			iptv_igmp_profile_list = groupmatchstr2
+		endif
+
+		;--- parse parameters (key=VOIP_SERVICE_ENABLED, voipServiceEnabled=value)
+		strcompare groupmatchstr1 "VOIP_SERVICE_ENABLED"
+		if result == 0 then
+			str2int voipServiceEnabled groupmatchstr2
+			int2str tmpStr voipServiceEnabled
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voipServiceEnabled<0 || voipServiceEnabled>1 then
+				errMsg="Wrong value of 'VOIP_SERVICE_ENABLED'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_TCONT_ID, voip_tcont_id=value)
+		strcompare groupmatchstr1 "VOIP_TCONT_ID"
+		if result == 0 then
+			str2int voip_tcont_id groupmatchstr2
+			int2str tmpStr voip_tcont_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_tcont_id < 0 then
+				errMsg="Wrong value of 'VOIP_TCONT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_DBA_PROFILE_NAME, voip_dba_profile=value)
+		strcompare groupmatchstr1 "VOIP_DBA_PROFILE_NAME"
+		if result == 0 then
+			voip_dba_profile = groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_DBA_PROFILE_ID, voip_dba_profile_id=value)
+		strcompare groupmatchstr1 "VOIP_DBA_PROFILE_ID"
+		if result == 0 then
+			str2int voip_dba_profile_id groupmatchstr2
+			int2str tmpStr voip_dba_profile_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_dba_profile_id < 0 then
+				errMsg="Wrong value of 'VOIP_DBA_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_GEMPORT_ID, voip_gemport_id=value)
+		strcompare groupmatchstr1 "VOIP_GEMPORT_ID"
+		if result == 0 then
+			str2int voip_gemport_id groupmatchstr2
+			int2str tmpStr voip_gemport_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'VOIP_GEMPORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_SERVICE_TYPE, voip_service_type=value)
+		strcompare groupmatchstr1 "VOIP_SERVICE_TYPE"
+		if result == 0 then
+			voip_service_type = groupmatchstr2
+			tolower voip_service_type voip_service_type
+			strcompare voip_service_type "tdm"
+			tmpVal = result
+			strcompare voip_service_type "eth"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'VOIP_SERVICE_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_GEMPORT_ENCRYPT, voip_gemport_encrypt=value)
+		strcompare groupmatchstr1 "VOIP_GEMPORT_ENCRYPT"
+		if result == 0 then
+			voip_gemport_encrypt = groupmatchstr2
+			tolower voip_gemport_encrypt voip_gemport_encrypt
+			strcompare voip_gemport_encrypt "off"
+			tmpVal = result
+			strcompare voip_gemport_encrypt "on"
+			if result <> 0 && tmpVal <> 0 then
+				errMsg="Wrong value of 'VOIP_GEMPORT_ENCRYPT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_PQN, voip_pqn=value)
+		strcompare groupmatchstr1 "VOIP_PQN"
+		if result == 0 then
+			str2int voip_pqn groupmatchstr2
+			int2str tmpStr voip_pqn
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_pqn < 0 then
+				errMsg="Wrong value of 'VOIP_PQN'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_UNI_VLAN_ID, voip_uni_vlan_id=value)
+		strcompare groupmatchstr1 "VOIP_UNI_VLAN_ID"
+		if result == 0 then
+			str2int voip_uni_vlan_id groupmatchstr2
+			int2str tmpStr voip_uni_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_uni_vlan_id < 0 then
+				errMsg="Wrong value of 'VOIP_UNI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_ANI_VLAN_ID, voip_ani_vlan_id=value)
+		strcompare groupmatchstr1 "VOIP_ANI_VLAN_ID"
+		if result == 0 then
+			str2int voip_ani_vlan_id groupmatchstr2
+			int2str tmpStr voip_ani_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_ani_vlan_id < 0 then
+				errMsg="Wrong value of 'VOIP_ANI_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_SERVICE_PORT_ID, voip_port_id=value)
+		strcompare groupmatchstr1 "VOIP_SERVICE_PORT_ID"
+		if result == 0 then
+			str2int voip_port_id groupmatchstr2
+			int2str tmpStr voip_port_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 then
+				errMsg="Wrong value of 'VOIP_SERVICE_PORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_SERVICE_PORT_DESC, voip_port_desc=value)
+		strcompare groupmatchstr1 "VOIP_SERVICE_PORT_DESC"
+		if result == 0 then
+			voip_port_desc = groupmatchstr2
+			strlen voip_port_desc
+			if result > 64 then
+				errMsg="Wrong setting of 'VOIP_SERVICE_PORT_DESC'(maximum length is 64)\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_MAX_CONNECTION, voip_max_connection=value)
+		strcompare groupmatchstr1 "VOIP_MAX_CONNECTION"
+		if result == 0 then
+			str2int voip_max_connection groupmatchstr2
+			int2str tmpStr voip_max_connection
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_max_connection < 1 then
+				errMsg="Wrong value of 'VOIP_MAX_CONNECTION'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+	endwhile
+	fileclose fd
+return
+
+
+:sanityCheck
+	; need PLOAM password setting if ont_auth_type <> 0
+	if ont_auth_type <> 0 then
+		strlen ploam_passwd_str
+		tmpVal=result
+		strlen ploam_passwd_hex
+		if tmpVal == 0 && result == 0 then
+			errMsg="You must specify PLOAM_PASSWD_STR or PLOAM_PASSWD_HEX if want to using password authentication\nPlease update your configuration file!"
+			goto errExit
+		endif
+	endif
+	; need PON serail number if ont_auth_type <> 1
+	if ont_auth_type <> 1 then
+		strlen pon_sn
+		if result == 0 then
+			errMsg="You must specify PON_SERIAL_NUMBER if want to using serial number authentication\nPlease update your configuration file!"
+			goto errExit
+		endif
+	endif
+	; OLT downlink port must be specify
+	strlen olt_downlinkStr
+	if result == 0 then
+		errMsg="You must specify OLT_DOWNLINK_PORT\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; ONT profile name
+	strlen ont_profile
+	if result == 0 then
+		errMsg="You must specify ONT_PROFILE\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; auto-generate ont_desc if not specify
+	strlen ont_desc
+	if result == 0 then
+		groupmatchstr1="ONT"
+		groupmatchstr2=olt_downlinkStr
+		int2str groupmatchstr3 ont_id
+		groupmatchstr4=ont_speedStr
+		if ont_auth_type <> 1 then
+			groupmatchstr5=pon_sn
+		else
+			groupmatchstr5="withoutSN"
+		endif
+		strjoin ont_desc "-" 5
+	endif
+
+	; Data Service related configuration
+	if dataServiceEnabled <> 0 then
+		; DBA profile for Data Service
+		strlen data_dba_profile
+		if result == 0 && data_dba_profile_id<0 then
+			errMsg="You must specify DATA_DBA_PROFILE_NAME or DATA_DBA_PROFILE_ID\nPlease update your configuration file!"
+			goto errExit
+		endif
+		; check GEM port ID for data service
+		if data_gemport_id < MIN_GEMPORT_ID then
+			data_gemport_id = MIN_GEMPORT_ID + ont_id * 3
+		endif
+		; check service port ID for data service
+		if data_port_id < 0 then
+			data_port_id = oltDownlinkPortID*1000 + data_gemport_id - (MIN_GEMPORT_ID-RESERVE_SERVICE_PORT_NO)
+		endif
+	endif
+
+	; IPTV Service related configuration
+	if iptvServiceEnabled <> 0 then
+		; DBA profile for IPTV Service
+		strlen iptv_dba_profile
+		if result == 0 && iptv_dba_profile_id<0 then
+			errMsg="You must specify IPTV_DBA_PROFILE_NAME or IPTV_DBA_PROFILE_ID\nPlease update your configuration file!"
+			goto errExit
+		endif
+		; IGMP profile for IPTV service
+		strlen iptv_igmp_profile_list
+		if result == 0 then
+			errMsg="You must specify IPTV_IGMP_PROFILE_LIST\nPlease update your configuration file!"
+			goto errExit
+		endif
+		; check GEM port ID for iptv service
+		if iptv_gemport_id < MIN_GEMPORT_ID then
+			iptv_gemport_id = MIN_GEMPORT_ID + 1 + ont_id * 3
+		endif
+		; check service port ID for iptv service
+		if iptv_port_id < 0 then
+			iptv_port_id = oltDownlinkPortID*1000 + iptv_gemport_id - (MIN_GEMPORT_ID-RESERVE_SERVICE_PORT_NO)
+		endif
+	endif
+
+	if voipServiceEnabled <> 0 then
+		; DBA profile for VoIP Service
+		strlen voip_dba_profile
+		if result == 0 && voip_dba_profile_id<0 then
+			errMsg="You must specify VOIP_DBA_PROFILE_NAME or VOIP_DBA_PROFILE_ID\nPlease update your configuration file!"
+			goto errExit
+		endif
+		; check GEM port ID for voip service
+		if voip_gemport_id < MIN_GEMPORT_ID then
+			voip_gemport_id = MIN_GEMPORT_ID + 2 + ont_id * 3
+		endif
+		; check service port ID for voip service
+		if voip_port_id < 0 then
+			voip_port_id = oltDownlinkPortID*1000 + voip_gemport_id - (MIN_GEMPORT_ID-RESERVE_SERVICE_PORT_NO)
+		endif
+	endif
+	result=0
+return
+
+
+:PrerequisitesCheck
+	; check ONT profile exist or not
+	sprintf2 cmdMsg "display ont-profile profile-name %s" ont_profile
+	sendln cmdMsg
+	call waitCR
+	wait "Profile ID" CMD_RESPONSE_FAILURE
+	if result <> 1 then
+		sprintf2 errMsg "ONT profile '%s' is not exist!" ont_profile
+		goto errExit
+	endif
+
+	; check DBA profile ID "tcont0_dba_id"
+	sprintf2 cmdMsg "display dba-profile profile-id %d" tcont0_dba_id
+	sendln cmdMsg
+	call waitCR
+	wait "Profile-name" CMD_RESPONSE_FAILURE
+	if result <> 1 then
+		sprintf2 errMsg "DBA profile ID '%d' is not exist!" tcont0_dba_id
+		goto errExit
+	endif
+
+	if dataServiceEnabled <> 0 then
+		; check DBA profile "data_dba_profile" & "data_dba_profile_id"
+		strlen data_dba_profile
+		if result <> 0 then
+			sprintf2 cmdMsg "display dba-profile profile-name %s" data_dba_profile
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-ID" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile name '%s'(%s) is not exist!\nPlease update DATA_DBA_PROFILE_NAME in configuration file!" data_dba_profile
+				goto errExit
+			endif
+		else
+			sprintf2 cmdMsg "display dba-profile profile-id %d" data_dba_profile_id
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-name" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile ID '%d' is not exist!\nPlease update DATA_DBA_PROFILE_ID in configuration file!" data_dba_profile_id
+				goto errExit
+			endif
+		endif
+	endif
+
+	if iptvServiceEnabled <> 0 then
+		; check DBA profile "iptv_dba_profile" & "iptv_dba_profile_id"
+		strlen iptv_dba_profile
+		if result <> 0 then
+			sprintf2 cmdMsg "display dba-profile profile-name %s" iptv_dba_profile
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-ID" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile name '%s' is not exist!\nPlease update IPTV_DBA_PROFILE_NAME in configuration file!" iptv_dba_profile
+				goto errExit
+			endif
+		else
+			sprintf2 cmdMsg "display dba-profile profile-id %d" iptv_dba_profile_id
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-name" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile ID '%d' is not exist!\nPlease update IPTV_DBA_PROFILE_ID in configuration file!" iptv_dba_profile_id
+				goto errExit
+			endif
+		endif
+	endif
+
+	if voipServiceEnabled <> 0 then
+		; check DBA profile "voip_dba_profile" & "voip_dba_profile_id"
+		strlen voip_dba_profile
+		if result <> 0 then
+			sprintf2 cmdMsg "display dba-profile profile-name %s" voip_dba_profile
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-ID" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile name '%s'(%s) is not exist!\nPlease update VOIP_DBA_PROFILE_NAME in configuration file!" data_dba_profile
+				goto errExit
+			endif
+		else
+			sprintf2 cmdMsg "display dba-profile profile-id %d" voip_dba_profile_id
+			sendln cmdMsg
+			call waitCR
+			wait "Profile-name" CMD_RESPONSE_FAILURE
+			if result <> 1 then
+				sprintf2 errMsg "DBA profile ID '%d' is not exist!\nPlease update VOIP_DBA_PROFILE_ID in configuration file!" data_dba_profile_id
+				goto errExit
+			endif
+		endif
+	endif
+	result=0
+return
+
+
+:findCfgFile
+	strlen cfgFile
+	if result == 0 then
+	; get configuration filename if not declare 'cfgFile'
+		filenamebox "Select config file" 0
+		if result == 0 then
+			end
+		endif
+		cfgFile = inputstr
+	else
+	; check configuration file exist or not
+		getfileattr cfgFile
+		if result == -1 then
+			sprintf2 errMsg "Can not open configuration file:\n%s" cfgFile
+			goto errExit
+		endif
+	endif
+return
+
+
+:updateLogFileName
+	gettime timeStr "%Y%m%d-%H%M%S"
+	strsplit log_file '.' 2
+	if result <> 2 goto errUpdateLogFileName
+	sprintf2 log_file "%s_%s.%s" groupmatchstr1 timeStr groupmatchstr2
+	;dispstr #10#13 "log file=" log_file #10#13
+	result=0
+	return
+:errUpdateLogFileName
+	result=1
+return
+
+
+;--- needs arguments: olt_ip, olt_user, olt_passwd
+:sshConnectOltMgmPort
+	strdim selectMsg 4
+	selectMsg[0] = "Try again"
+	selectMsg[1] = "Change IP Address of OLT management port"
+	selectMsg[2] = "Exit"
+	testlink
+	while result != 2
+		sprintf2 sshCmd "%s:22 /ssh /2 /auth=password /user=%s /passwd=%s /nosecuritywarning" olt_ip olt_user olt_passwd
+		connect sshCmd
+		if result == 2 break
+		sprintf2 msg "ssh: connect to '%s' port 22: Connection timed out!" olt_ip
+		listbox msg "select" selectMsg 1
+		if result == 0 continue
+		if result == 2 || result == -1 goto normalExit
+		inputbox "Input IP address of OLT management port"#13#10"        (Abort program if empty)" "input" olt_ip
+		strlen inputstr
+		if result <= 0 goto normalExit
+		olt_ip = inputstr
+	endwhile
+	;--- WORKAROUND: command 'connect' will not return failed if user name or password are incorrect!
+	mpause 1500
+	testlink
+	if result < 2 then
+		errMsg="user name or password incorrect, please update your configuration file!"
+		goto errExit
+	endif
+return
+
+
+:checkIPv4
+	strsplit tmpStr "."
+	if result <> 4 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr1
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr1 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr2
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr2 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr3
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr3 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr4
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr4 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	result = 0
+	return
+:errCheckIPv4
+	result = 1
+return
+
+
+; string format: frameID/slotID/portID, string stored in argument 'tmpStr'
+:oltPortFmtCheck
+	strsplit tmpStr "/"
+	if result <> 3 goto errOltPortFmtCheck
+
+	str2int tmpVal groupmatchstr1
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr1 tmpStr
+	if result <> 0 || tmpVal < 0 goto errOltPortFmtCheck
+
+	str2int tmpVal groupmatchstr2
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr2 tmpStr
+	if result <> 0 || tmpVal < 0 goto errOltPortFmtCheck
+
+	str2int tmpVal groupmatchstr3
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr3 tmpStr
+	if result <> 0 || tmpVal < 0 goto errOltPortFmtCheck
+
+	result = 0
+	return
+:errOltPortFmtCheck
+	result = 1
+return
+
+
+:waitCR
+	waitregex PROMPT_INPUT_CR_REGEX "error locates at '\^'"
+	if result <> 1 then
+		errMsg="Parameter error!"
+		goto errExit
+	endif
+	sendln
+return
+
+
+:enterCfgGponMode
+	timeout=5
+	sprintf2 cmdMsg "interface gpon %d/%d" oltDownlinkFrameID oltDownlinkSlotID
+	sprintf2 waitMsg "(config-if-gpon-%d/%d)#" oltDownlinkFrameID oltDownlinkSlotID
+	sendln cmdMsg
+	wait waitMsg CMD_RESPONSE_WRONG
+	if result <> 1 then
+		errMsg = "Frame ID or Slot ID is wrong, please update 'OLT_DOWNLINK_PORT' in configuration file"
+		goto errExit
+	endif
+	timeout=0
+	result=0
+return
+
+
+:back2CfgMode
+	timeout=0
+	sendln "quit"
+	wait PROMPT_CFG_MODE
+return
+
+
+:askErrExit
+	strlen tmpStr
+	if result == 0 tmpStr="Error"
+	logwrite #13#10#13#10#9
+	logwrite tmpStr
+	logwrite ": "
+	logwrite errMsg
+	logwrite #13#10
+	sendln
+
+	sprintf2 errMsg "%s\nAbort process?" errMsg
+	strspecial errMsg
+	yesnobox errMsg tmpStr
+	if result == 0 return
+
+	logwrite #13#10#9#9
+	logwrite "!!! Abort Process !!!"
+	logwrite #13#10#13#10
+	sendln
+	finishSteps = 0
+	dataFinishSteps = 0
+	iptvFinishSteps = 0
+	voipFinishSteps = 0
+	errMsg=""
+	errorFlag=1
+goto normalExit
+
+:errExit
+	strlen errMsg
+	if result <> 0 then
+		strspecial errMsg
+		messagebox errMsg "Error"
+		logwrite #13#10#13#10#9
+		logwrite errMsg
+		logwrite #13#10#9#9
+		logwrite "!!! Abort Process !!!"
+		logwrite #13#10#13#10
+		sendln
+	endif
+	call deleteIpevService
+	call deleteDataService
+	call deleteVoipService
+	while finishSteps>0
+		if finishSteps == 1 call deleteONT
+		finishSteps=finishSteps-1
+	endwhile
+	errorFlag=1
+	; pass through
+:normalExit
+	if errorFlag == 0 then
+		logwrite #13#10#13#10#9'Done.'#13#10#13#10
+		sendln
+	endif
+	;--- it will cause MACRO failed if close logging/TeraTerm in unlink state
+	testlink
+	if result >= 1 then
+		if logEnabled <> 0 then
+			logclose
+			sprintf2 cmdMsg "notepad %s" log_file
+			exec cmdMsg
+		endif
+		;closett
+	endif
+end
