@@ -1,0 +1,851 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                                                     ;
+; This script uses to add/delete ONT profile on HUAWEI MA5800-X7 OLT. ;
+;                                                                     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; === Notes ===
+; Maximum length of string: 511 (see https://ttssh2.osdn.jp/manual/4/en/macro/syntax/types.html)
+
+; === constant value ===
+SUPPORTED_OLT_FW_VER="MA5800V100R019C11"
+PROFILE_NAME_MAX_LEN=63
+
+PROMPT_USER_CHAR=">"
+PROMPT_ADMIN_CHAR="#"
+PROMPT_DIAG_MODE="(diagnose)%%"
+PROMPT_CFG_MODE="(config)#"
+PROMPT_BTV_MODE="(config-btv)#"
+PROMPT_INPUT_CR_REGEX = "^{ <cr>.* }: $"
+PROMPT_YES_NO="(y/n)"
+
+CMD_RESPONSE_WRONG="locates at '^'"
+CMD_RESPONSE_FAILURE="Failure"
+
+; === setup default configuration file ===
+cfgFile=""
+;cfgFile="HuaweiMA5800-X7_ONT_Profile_GPT-5610C1.cfg"
+
+; === setup default value for global parameters(get form configuration file) ===
+op_mode=0
+log_file=""
+olt_ip="10.11.104.19"
+olt_user="RDtest"
+olt_passwd="RDtest1234"
+ont_profile_id=-1
+ont_profile=""
+pots_auto_adaptive=0
+pots_ports=0
+eth_auto_adaptive=0
+eth_ports=0
+vdsl_auto_adaptive=0
+vdsl_ports=0
+tdm_port_type=1
+tdm_service_type=1
+tdm_ports=0
+moca_ports=0
+catv_auto_adaptive=0
+catv_ports=0
+wifi_ports=0
+map_mode=1
+flowCtrl_type=1
+
+; === Internal parameters, will be auto-generate or temporary used ===
+oltFWver=""
+profile_set_mode=0 ;0: unset, 1: name, 2: id, 3 name+id
+errorFlag=0
+logEnabled=0
+tmpStr=""
+tmpVal=0
+errMsg=""
+logMsg=""
+waitMsg=""
+cmdMsg=""
+
+
+; !!!! Program START !!!!
+; === Minimizes MACRO dialog box ===
+show 0
+
+; === check current version of TeraTerm, must uses version 4.78 or later ===
+getver ttVer "4.78"
+if result < 0 then
+	sprintf2 errMsg "TeraTerm version is v%s, it is too old, please migrate to v%s+" ttVer "4.78"
+	goto errExit
+endif
+
+; === find the configuration file ===
+call findCfgFile
+
+; === open/parse configuration file(read-only) ===
+call parseCfgFile
+
+; === sanity check ===
+call sanityCheck
+
+; === Terminates the link between the current TeraTerm window and MACRO ===
+;--- keep current TeraTerm window and create new TeraTerm window for next connection
+;unlink
+; === disconnect host/device connection if connection established ===
+;--- use current TeraTerm window for next connection
+testlink
+if result == 2 then
+	disconnect 0
+	waitevent 4
+endif
+
+; === create log file ===
+logEnabled=0
+strlen log_file
+if result <> 0 then
+	strscan log_file ":"
+	if result == 0 then
+		; convert relative path to absolute path
+		getdir tmpStr
+		sprintf2 log_file "%s\%s" tmpStr log_file
+	endif
+	logopen log_file 0 0 1 1
+	if result <> 0 then
+		sprintf2 errMsg "fail to open logging file: %s" log_file
+		goto errExit
+	endif
+	logEnabled=1
+endif
+
+; === connect to OLT management port ===
+call sshConnectOltMgmPort
+wait PROMPT_USER_CHAR
+;--- enter config mode
+sendln "enable"
+wait PROMPT_ADMIN_CHAR
+sendln "config"
+wait PROMPT_CFG_MODE
+
+; === check OLT firmware version ===
+call getOLTfwVersion
+if result == 0 then
+	strcompare oltFWver SUPPORTED_OLT_FW_VER
+	if result <> 0 then
+		sprintf2 errMsg "This script only tested for firmware '%s', but current firmware is '%s'" SUPPORTED_OLT_FW_VER oltFWver
+		call askErrExit
+	endif
+else
+		sprintf2 errMsg "Can not get firmware version! This script only tested for firmware '%s'" SUPPORTED_OLT_FW_VER
+		call askErrExit
+endif
+
+; === check configuration mode, must be 'distributing-mode' ===
+call chkCfgMode
+
+; === delete ONT profile first ===
+if op_mode >= 1 then
+	call deleteONTprofile
+	if op_mode == 1 goto normalExit
+endif
+
+; === add ONT ===
+call addONTprofile
+
+; === show ONT profile information
+if profile_set_mode & 1 then
+	sprintf2 cmdMsg "display ont-profile profile-name %s" ont_profile
+else
+	sprintf2 cmdMsg "display ont-profile profile-id %d" ont_profile_id
+endif
+sendln cmdMsg
+call waitCR
+wait PROMPT_CFG_MODE
+
+
+; !!!! Program STOP !!!!
+goto normalExit
+
+
+:addONTprofile
+	cmdMsg = "ont-profile add"
+	if profile_set_mode & 1 then
+		sprintf2 cmdMsg "%s profile-name %s" cmdMsg ont_profile
+	endif
+	if profile_set_mode & 2 then
+		sprintf2 cmdMsg "%s profile-id %d" cmdMsg ont_profile_id
+	endif
+	sendln cmdMsg
+	if profile_set_mode <> 3 call waitCR
+	; POTS
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "POTS ports to auto-adaptive?"
+	if result <> 3 goto addONTprofileErrExit
+	if pots_auto_adaptive <> 0 then
+		sendln "y"
+	else
+		sendln "n"
+	endif
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "POTS ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" pots_ports
+	sendln cmdMsg
+	; ETH
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "ETH ports to auto-adaptive?"
+	if result <> 3 goto addONTprofileErrExit
+	if eth_auto_adaptive <> 0 then
+		sendln "y"
+	else
+		sendln "n"
+	endif
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "ETH ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" eth_ports
+	sendln cmdMsg
+	; VDSL
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "VDSL ports to auto-adaptive?"
+	if result <> 3 goto addONTprofileErrExit
+	if vdsl_auto_adaptive <> 0 then
+		sendln "y"
+	else
+		sendln "n"
+	endif
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "VDSL ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" vdsl_ports
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "TDM port type<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" tdm_port_type
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "TDM service type<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" tdm_service_type
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "TDM ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" tdm_ports
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "MOCA ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" moca_ports
+	sendln cmdMsg
+	; CATV
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "CATV UNI ports to auto-adaptive?"
+	if result <> 3 goto addONTprofileErrExit
+	if catv_auto_adaptive <> 0 then
+		sendln "y"
+	else
+		sendln "n"
+	endif
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "CATV UNI ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" catv_ports
+	sendln cmdMsg
+	; WiFi
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "WiFi ports<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" wifi_ports
+	sendln cmdMsg
+	; Mapping mode
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "Mapping mode<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" map_mode
+	sendln cmdMsg
+	; flow control
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "flow control<"
+	if result <> 3 goto addONTprofileErrExit
+	sprintf2 cmdMsg "%d" flowCtrl_type
+	sendln cmdMsg
+	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "ONT profile succeeded"
+	if result <> 3 goto addONTprofileErrExit
+	wait PROMPT_CFG_MODE
+	logwrite #13#10#13#10#9'ONT Profile Added'#13#10#13#10
+	sendln
+	result=0
+return
+:addONTprofileErrExit
+	errMsg = "Fail to add ONT profile, please to check log/configuration file!"
+goto errExit
+
+
+:deleteONTprofile
+	if profile_set_mode & 1 then
+		sprintf2 cmdMsg "ont-profile delete profile-name %s" ont_profile
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded"
+	endif
+	if profile_set_mode & 2 then
+		sprintf2 cmdMsg "ont-profile delete profile-id %d" ont_profile_id
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "succeeded"
+	endif
+	logwrite #13#10#13#10#9'ONT Profile Deleted'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:chkCfgMode
+	sendln "diagnose"
+	wait PROMPT_DIAG_MODE
+	timeout=5
+	sendln "display xpon mode"
+	call waitCR
+	wait "distributing-mode" PROMPT_DIAG_MODE
+	if result <> 1 then
+		errMsg="Configuration mode is not 'distributing-mode'"
+		goto errExit
+	endif
+	sendln "config"
+	wait PROMPT_CFG_MODE
+	timeout=0
+	result=0
+return
+
+
+:parseCfgFile
+	fileopen fd cfgFile 0 1
+	lineNo=0
+	while 1
+		filereadln fd lineStr
+		;--- break loop if EOF
+		if result == 1 break
+
+		lineNo=lineNo+1
+		backupOrigLineStr=lineStr
+		;--- remove leading and trailing whitespace
+		strtrim lineStr ' '
+		;--- ignore empty/null string
+		strlen lineStr
+		if result == 0 then
+			continue
+		endif
+		;--- ignore comment
+		strcopy lineStr 1 1 tmpStr
+		strcompare tmpStr ";"
+		if result == 0 then
+			continue
+		endif
+		;dispstr #10#13 "line: " lineStr #10#13
+		strsplit lineStr '=' 2
+		if result <> 2 then
+			fileclose fd
+			sprintf2 errMsg "Wrong format at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+		;--- remove leading and trailing whitespace, to get key(groupmatchstr1) and value(groupmatchstr2)
+		strtrim groupmatchstr1 ' '
+		strtrim groupmatchstr2 ' '
+		;--- it will cause file open failed if not remove double quotes '"' from string of filename
+		strtrim groupmatchstr2 '"'
+		;dispstr #10#13 "key=" groupmatchstr1 " value=" groupmatchstr2 #10#13
+		strlen groupmatchstr2
+		if result == 0 then
+			fileclose fd
+			sprintf2 errMsg "Wrong setting at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+
+		;--- parse parameters (key=OP_MODE, op_mode=value)
+		strcompare groupmatchstr1 "OP_MODE"
+		if result == 0 then
+			str2int op_mode groupmatchstr2
+			int2str tmpStr op_mode
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || op_mode < 0 || op_mode > 2 then
+				errMsg="Wrong value of 'OP_MODE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=LOG_FILE, log_file=value)
+		strcompare groupmatchstr1 "LOG_FILE"
+		if result == 0 then
+			log_file=groupmatchstr2
+			call updateLogFileName
+			if result <> 0 then
+				sprintf2 errMsg "Wrong format of log filename:\n\n   '%s'" log_file
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_IPv4, olt_ip=value)
+		strcompare groupmatchstr1 "OLT_MGM_IPv4"
+		if result == 0 then
+			olt_ip=groupmatchstr2
+			tmpStr=groupmatchstr2
+			call checkIPv4
+			if result <> 0 then
+				errMsg="Wrong format of 'OLT_MGM_IPv4'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_USER, olt_user=value)
+		strcompare groupmatchstr1 "OLT_MGM_USER"
+		if result == 0 then
+			olt_user=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_PASSWD, olt_passwd=value)
+		strcompare groupmatchstr1 "OLT_MGM_PASSWD"
+		if result == 0 then
+			olt_passwd=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_PROFILE, ont_profile=value)
+		strcompare groupmatchstr1 "ONT_PROFILE"
+		if result == 0 then
+			ont_profile = groupmatchstr2
+			strlen ont_profile
+			if result > PROFILE_NAME_MAX_LEN then
+				errMsg="Wrong value of 'ONT_PROFILE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			profile_set_mode = profile_set_mode | 1
+			continue
+		endif
+
+		;--- parse parameters (key=ONT_PROFILE_ID, ont_profile_id=value)
+		strcompare groupmatchstr1 "ONT_PROFILE_ID"
+		if result == 0 then
+			str2int ont_profile_id groupmatchstr2
+			int2str tmpStr ont_profile_id
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || ont_profile_id < 0 then
+				errMsg="Wrong value of 'ONT_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			profile_set_mode = profile_set_mode | 2
+			continue
+		endif
+
+		;--- parse parameters (key=POTS_AUTO_ADAPTIVE, pots_auto_adaptive=value)
+		strcompare groupmatchstr1 "POTS_AUTO_ADAPTIVE"
+		if result == 0 then
+			strcompare groupmatchstr2 "y"
+			if result == 0 then
+				pots_auto_adaptive = 1
+			else
+				strcompare groupmatchstr2 "n"
+				if result <> 0 then
+					errMsg="Wrong value of 'POTS_AUTO_ADAPTIVE'\nPlease update your configuration file!"
+					goto errExit
+				endif
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=POTS_PORTS, pots_ports=value)
+		strcompare groupmatchstr1 "POTS_PORTS"
+		if result == 0 then
+			str2int pots_ports groupmatchstr2
+			int2str tmpStr pots_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || pots_ports < 0 then
+				errMsg="Wrong value of 'POTS_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=ETH_AUTO_ADAPTIVE, eth_auto_adaptive=value)
+		strcompare groupmatchstr1 "ETH_AUTO_ADAPTIVE"
+		if result == 0 then
+			strcompare groupmatchstr2 "y"
+			if result == 0 then
+				eth_auto_adaptive = 1
+			else
+				strcompare groupmatchstr2 "n"
+				if result <> 0 then
+					errMsg="Wrong value of 'ETH_AUTO_ADAPTIVE'\nPlease update your configuration file!"
+					goto errExit
+				endif
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=ETH_PORTS, eth_ports=value)
+		strcompare groupmatchstr1 "ETH_PORTS"
+		if result == 0 then
+			str2int eth_ports groupmatchstr2
+			int2str tmpStr eth_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || eth_ports < 0 then
+				errMsg="Wrong value of 'ETH_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VDSL_AUTO_ADAPTIVE, vdsl_auto_adaptive=value)
+		strcompare groupmatchstr1 "VDSL_AUTO_ADAPTIVE"
+		if result == 0 then
+			strcompare groupmatchstr2 "y"
+			if result == 0 then
+				vdsl_auto_adaptive = 1
+			else
+				strcompare groupmatchstr2 "n"
+				if result <> 0 then
+					errMsg="Wrong value of 'VDSL_AUTO_ADAPTIVE'\nPlease update your configuration file!"
+					goto errExit
+				endif
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VDSL_PORTS, vdsl_ports=value)
+		strcompare groupmatchstr1 "VDSL_PORTS"
+		if result == 0 then
+			str2int vdsl_ports groupmatchstr2
+			int2str tmpStr vdsl_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || vdsl_ports < 0 then
+				errMsg="Wrong value of 'VDSL_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=TDM_PORT_TYPE, tdm_port_type=value)
+		strcompare groupmatchstr1 "TDM_PORT_TYPE"
+		if result == 0 then
+			str2int tdm_port_type groupmatchstr2
+			int2str tmpStr tdm_port_type
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || tdm_port_type < 1 || tdm_port_type > 2 then
+				errMsg="Wrong value of 'TDM_PORT_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=TDM_PORTS, tdm_ports=value)
+		strcompare groupmatchstr1 "TDM_PORTS"
+		if result == 0 then
+			str2int tdm_ports groupmatchstr2
+			int2str tmpStr tdm_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || tdm_ports < 0 then
+				errMsg="Wrong value of 'TDM_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=MOCA_PORTS, moca_ports=value)
+		strcompare groupmatchstr1 "MOCA_PORTS"
+		if result == 0 then
+			str2int moca_ports groupmatchstr2
+			int2str tmpStr moca_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || moca_ports < 0 then
+				errMsg="Wrong value of 'MOCA_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=TDM_SERVICE_TYPE, tdm_service_type=value)
+		strcompare groupmatchstr1 "TDM_SERVICE_TYPE"
+		if result == 0 then
+			str2int tdm_service_type groupmatchstr2
+			int2str tmpStr tdm_service_type
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || tdm_service_type <> 1 then
+				errMsg="Wrong value of 'TDM_SERVICE_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=CATV_AUTO_ADAPTIVE, catv_auto_adaptive=value)
+		strcompare groupmatchstr1 "CATV_AUTO_ADAPTIVE"
+		if result == 0 then
+			strcompare groupmatchstr2 "y"
+			if result == 0 then
+				catv_auto_adaptive = 1
+			else
+				strcompare groupmatchstr2 "n"
+				if result <> 0 then
+					errMsg="Wrong value of 'CATV_AUTO_ADAPTIVE'\nPlease update your configuration file!"
+					goto errExit
+				endif
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=CATV_PORTS, catv_ports=value)
+		strcompare groupmatchstr1 "CATV_PORTS"
+		if result == 0 then
+			str2int catv_ports groupmatchstr2
+			int2str tmpStr catv_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || catv_ports < 0 then
+				errMsg="Wrong value of 'CATV_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=WIFI_PORTS, wifi_ports=value)
+		strcompare groupmatchstr1 "WIFI_PORTS"
+		if result == 0 then
+			str2int wifi_ports groupmatchstr2
+			int2str tmpStr wifi_ports
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || wifi_ports < 0 then
+				errMsg="Wrong value of 'WIFI_PORTS'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=MAP_MODE, map_mode=value)
+		strcompare groupmatchstr1 "MAP_MODE"
+		if result == 0 then
+			str2int map_mode groupmatchstr2
+			int2str tmpStr map_mode
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || map_mode < 1 then
+				errMsg="Wrong value of 'MAP_MODE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=FLOW_CTRL_TYPE, flowCtrl_type=value)
+		strcompare groupmatchstr1 "FLOW_CTRL_TYPE"
+		if result == 0 then
+			str2int flowCtrl_type groupmatchstr2
+			int2str tmpStr flowCtrl_type
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || flowCtrl_type < 1 then
+				errMsg="Wrong value of 'FLOW_CTRL_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+	endwhile
+	fileclose fd
+return
+
+
+:sanityCheck
+	; check parameters of ONT profile
+	if profile_set_mode == 0 then
+		errMsg="You must specify ONT_PROFILE or/and ONT_PROFILE_ID\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; check value of POTS_PORTS
+	if pots_auto_adaptive <> 0 && pots_ports < 1 then
+		errMsg="Wrong value of 'POTS_PORTS', must greater than 0\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; check value of ETH_PORTS
+	if eth_auto_adaptive <> 0 && eth_ports < 1 then
+		errMsg="Wrong value of 'ETH_PORTS', must greater than 0\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; check value of VDSL_PORTS
+	if vdsl_auto_adaptive <> 0 && vdsl_ports < 1 then
+		errMsg="Wrong value of 'VDSL_PORTS', must greater than 0\nPlease update your configuration file!"
+		goto errExit
+	endif
+	; check value of CATV_PORTS
+	if catv_auto_adaptive <> 0 && catv_ports < 1 then
+		errMsg="Wrong value of 'CATV_PORTS', must greater than 0\nPlease update your configuration file!"
+		goto errExit
+	endif
+	result=0
+return
+
+
+:findCfgFile
+	strlen cfgFile
+	if result == 0 then
+	; get configuration filename if not declare 'cfgFile'
+		filenamebox "Select config file" 0
+		if result == 0 then
+			end
+		endif
+		cfgFile = inputstr
+	else
+	; check configuration file exist or not
+		getfileattr cfgFile
+		if result == -1 then
+			sprintf2 errMsg "Can not open configuration file:\n%s" cfgFile
+			goto errExit
+		endif
+	endif
+return
+
+
+:updateLogFileName
+	gettime timeStr "%Y%m%d-%H%M%S"
+	strsplit log_file '.' 2
+	if result <> 2 goto errUpdateLogFileName
+	sprintf2 log_file "%s_%s.%s" groupmatchstr1 timeStr groupmatchstr2
+	;dispstr #10#13 "log file=" log_file #10#13
+	result=0
+	return
+:errUpdateLogFileName
+	result=1
+return
+
+
+;--- needs arguments: olt_ip, olt_user, olt_passwd
+:sshConnectOltMgmPort
+	strdim selectMsg 4
+	selectMsg[0] = "Try again"
+	selectMsg[1] = "Change IP Address of OLT management port"
+	selectMsg[2] = "Exit"
+	testlink
+	while result != 2
+		sprintf2 sshCmd "%s:22 /ssh /2 /auth=password /user=%s /passwd=%s /nosecuritywarning" olt_ip olt_user olt_passwd
+		connect sshCmd
+		if result == 2 break
+		sprintf2 msg "ssh: connect to '%s' port 22: Connection timed out!" olt_ip
+		listbox msg "select" selectMsg 1
+		if result == 0 continue
+		if result == 2 || result == -1 goto normalExit
+		inputbox "Input IP address of OLT management port"#13#10"        (Abort program if empty)" "input" olt_ip
+		strlen inputstr
+		if result <= 0 goto normalExit
+		olt_ip = inputstr
+	endwhile
+	;--- WORKAROUND: command 'connect' will not return failed if user name or password are incorrect!
+	mpause 1500
+	testlink
+	if result < 2 then
+		errMsg="user name or password incorrect, please update your configuration file!"
+		goto errExit
+	endif
+return
+
+
+:checkIPv4
+	strsplit tmpStr "."
+	if result <> 4 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr1
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr1 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr2
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr2 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr3
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr3 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr4
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr4 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	result = 0
+	return
+:errCheckIPv4
+	result = 1
+return
+
+
+:waitCR
+	waitregex PROMPT_INPUT_CR_REGEX "error locates at '\^'"
+	if result <> 1 then
+		sprintf2 errMsg "Parameter error!(%d)" result
+		;errMsg="Parameter error!"
+		goto errExit
+	endif
+	sendln
+return
+
+
+:back2CfgMode
+	timeout=0
+	sendln "quit"
+	wait PROMPT_CFG_MODE
+return
+
+
+:getOLTfwVersion
+	sendln "display version"
+	call waitCR
+	timeout=1
+	do
+		recvln
+		if result == 0 break;
+		strscan inputstr "VERSION : "
+		if result <> 0 then
+			wait PROMPT_CFG_MODE
+			strsplit inputstr ':'
+			if result <> 2 break
+			oltFWver = groupmatchstr2
+			strtrim oltFWver " "
+			result = 0
+			break
+		endif
+	loop
+:getOLTfwVersionExit
+	timeout=0
+return
+
+
+:askErrExit
+	logwrite #13#10#13#10#9'Warning: '
+	logwrite errMsg
+	logwrite #13#10
+	sendln
+
+	sprintf2 errMsg "%s\n\nAbort process?" errMsg
+	strspecial errMsg
+	yesnobox errMsg tmpStr
+	if result == 0 return
+
+	logwrite #13#10#9#9
+	logwrite "!!! Abort Process !!!"
+	logwrite #13#10#13#10
+	sendln
+	errorFlag=1
+goto normalExit
+
+
+:errExit
+	strlen errMsg
+	if result <> 0 then
+		strspecial errMsg
+		messagebox errMsg "Error"
+		logwrite #13#10#13#10#9
+		logwrite errMsg
+		logwrite #13#10#9#9
+		logwrite "!!! Abort Process !!!"
+		logwrite #13#10#13#10
+		sendln
+	endif
+	errorFlag=1
+	; pass through
+:normalExit
+	if errorFlag == 0 then
+		logwrite #13#10#9'Done.'#13#10
+		sendln
+	endif
+	;--- it will cause MACRO failed if close logging/TeraTerm in unlink state
+	testlink
+	if result >= 1 then
+		if logEnabled <> 0 then
+			logclose
+			sprintf2 cmdMsg "notepad %s" log_file
+			exec cmdMsg
+		endif
+		; do not close TeraTerm if not create log file!
+		if logEnabled <> 0 closett
+	endif
+end

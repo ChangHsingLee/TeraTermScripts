@@ -1,0 +1,112 @@
+[2023-05-12 18:21:14.719] 
+[2023-05-12 18:21:14.719] 
+[2023-05-12 18:21:14.719]   Huawei Integrated Access Software (MA5800).
+[2023-05-12 18:21:14.719]   Copyright(C) Huawei Technologies Co., Ltd. 2002-2019. All rights reserved.
+[2023-05-12 18:21:14.723] 
+[2023-05-12 18:21:14.725] 
+[2023-05-12 18:21:14.725] MA5800-X7>
+[2023-05-12 18:21:14.731]   Warning: Using the initial password is not recommended. Please change the password.
+[2023-05-12 18:21:14.734] 
+[2023-05-12 18:21:14.734] MA5800-X7>enable 
+[2023-05-12 18:21:15.724] 
+[2023-05-12 18:21:15.724] MA5800-X7#config 
+[2023-05-12 18:21:15.863] 
+[2023-05-12 18:21:15.863] MA5800-X7(config)#display version 
+[2023-05-12 18:21:16.198] { <cr>|backplane<K>|frameid/slotid<S><Length 3-15>||<K> }: 
+[2023-05-12 18:21:16.282] 
+[2023-05-12 18:21:16.282]   Command:
+[2023-05-12 18:21:16.282]           display version
+[2023-05-12 18:21:16.296] 
+[2023-05-12 18:21:16.296]   VERSION : MA5800V100R019C11
+[2023-05-12 18:21:16.296]   PATCH   : SPH216
+[2023-05-12 18:21:16.296]   PRODUCT : MA5800-X7
+[2023-05-12 18:21:16.296] 
+[2023-05-12 18:21:16.313]   Active Mainboard Running Area Information: 
+[2023-05-12 18:21:16.313]   --------------------------------------------------
+[2023-05-12 18:21:16.313]   Current Program Area : Area A 
+[2023-05-12 18:21:16.313]   Current Data Area : Area A 
+[2023-05-12 18:21:16.313] 
+[2023-05-12 18:21:16.313]   Program Area A Version : MA5800V100R019C11 
+[2023-05-12 18:21:16.313]   Program Area B Version : MA5800V100R019C11 
+[2023-05-12 18:21:16.313] 
+[2023-05-12 18:21:16.313]   Data Area A Version : MA5800V100R019C11 
+[2023-05-12 18:21:16.313]   Data Area B Version : MA5800V100R019C11 
+[2023-05-12 18:21:16.313]   --------------------------------------------------
+[2023-05-12 18:21:16.313] 
+[2023-05-12 18:21:16.350]   Uptime is 152 day(s), 9 hour(s), 47 minute(s), 38 second(s)
+[2023-05-12 18:21:16.364] 
+[2023-05-12 18:21:16.364] MA5800-X7(config)#diagnose 
+[2023-05-12 18:21:16.591] 
+[2023-05-12 18:21:16.591] MA5800-X7(diagnose)%%display xpon mode 
+[2023-05-12 18:21:17.118] { <cr>||<K> }: 
+[2023-05-12 18:21:17.216] 
+[2023-05-12 18:21:17.216]   Command:
+[2023-05-12 18:21:17.216]           display xpon mode
+[2023-05-12 18:21:17.219]   -------------------------------------------------------
+[2023-05-12 18:21:17.219]         Current configuration mode: distributing-mode
+[2023-05-12 18:21:17.221]   -------------------------------------------------------
+[2023-05-12 18:21:17.223] 
+[2023-05-12 18:21:17.223] MA5800-X7(diagnose)%%config 
+[2023-05-12 18:21:17.431] 
+[2023-05-12 18:21:17.431] MA5800-X7(config)#ont-profile add profile-name DMS_ONT_GPT-5610C1 
+[2023-05-12 18:21:17.593] { <cr>|profile-id<K> }: 
+[2023-05-12 18:21:17.627] 
+[2023-05-12 18:21:17.627]   Command:
+[2023-05-12 18:21:17.627]           ont-profile add profile-name DMS_ONT_GPT-5610C1
+[2023-05-12 18:21:17.629]   Press 'Q' or 'q' to quit input
+[2023-05-12 18:21:17.630] >  Are you sure you want to set the number of POTS ports to auto-adaptive? (y/n) [n]:n
+[2023-05-12 18:21:17.656] >  Number of POTS ports<0-32> [0]:0
+[2023-05-12 18:21:17.681] >  Are you sure you want to set the number of ETH ports to auto-adaptive? (y/n) [n]:y
+[2023-05-12 18:21:17.707] > Max number of adaptive ETH ports<1-24> [8]:1
+[2023-05-12 18:21:17.722] >  Are you sure you want to set the number of VDSL ports to auto-adaptive? (y/n) [n]:n
+[2023-05-12 18:21:17.753] >  Number of VDSL ports<0-8>  [0]:0
+[2023-05-12 18:21:17.778] >  TDM port type<1-E1,2-T1> [1]:1
+[2023-05-12 18:21:17.802] >  TDM service type<1-TDMoGEM> [1]:1
+[2023-05-12 18:21:17.826] >  Number of TDM ports<0-8> [0]:0
+[2023-05-12 18:21:17.854] >  Number of MOCA ports<0-8> [0]:0
+[2023-05-12 18:21:17.880] >  Are you sure you want to set the number of CATV UNI ports to auto-adaptive? (y/n) [n]:n
+[2023-05-12 18:21:17.906] >  Number of CATV UNI ports<0-8> [0]:0
+[2023-05-12 18:21:17.933] >  Number of WiFi ports<0-4> [0]:0
+[2023-05-12 18:21:17.963] >  Mapping mode<1-VLANID, 2-802_1pPRI, 3-VLANID_802_1pPRI, 4-PORTID,
+[2023-05-12 18:21:17.963]    5-PORTID_VLANID, 6-PORTID_802_1pPRI, 7-PORTID_VLANID_802_1pPRI,
+[2023-05-12 18:21:17.963]    9-IPTOS, 10-VLANID_IPTOS> [1]:1
+[2023-05-12 18:21:17.991] >  The type of flow control<1-PQ, 2-GEMPORT-CAR, 3-FLOW-CAR> [1]:1
+[2023-05-12 18:21:18.016]   Adding an ONT profile succeeded
+[2023-05-12 18:21:18.016]   Profile ID  : 19
+[2023-05-12 18:21:18.016]   Profile name: DMS_ONT_GPT-5610C1
+[2023-05-12 18:21:18.029] 
+[2023-05-12 18:21:18.029] MA5800-X7(config)#
+
+	ONT Profile Added
+
+
+[2023-05-12 18:21:18.055] 
+[2023-05-12 18:21:18.055] MA5800-X7(config)#display ont-profile profile-name DMS_ONT_GPT-5610C1 
+[2023-05-12 18:21:18.453] { <cr>||<K> }: 
+[2023-05-12 18:21:18.540] 
+[2023-05-12 18:21:18.540]   Command:
+[2023-05-12 18:21:18.540]           display ont-profile profile-name DMS_ONT_GPT-5610C1
+[2023-05-12 18:21:18.547]   ---------------------------------------------------------------------------
+[2023-05-12 18:21:18.547]   Profile ID  : 19
+[2023-05-12 18:21:18.547]   Profile name: DMS_ONT_GPT-5610C1
+[2023-05-12 18:21:18.547]   ---------------------------------------------------------------------------
+[2023-05-12 18:21:18.547]   Number of POTS ports:               0
+[2023-05-12 18:21:18.547]   Number of max POTS adaptive:        -
+[2023-05-12 18:21:18.547]   Number of ETH ports:                adaptive
+[2023-05-12 18:21:18.547]   Number of max ETH adaptive:         1
+[2023-05-12 18:21:18.547]   Number of VDSL ports:               0
+[2023-05-12 18:21:18.547]   Number of max VDSL adaptive:        -
+[2023-05-12 18:21:18.547]   TDM port type:                      E1
+[2023-05-12 18:21:18.547]   TDM service type:                   TDMoGem
+[2023-05-12 18:21:18.547]   Number of TDM ports:                0
+[2023-05-12 18:21:18.547]   Number of MOCA ports:               0
+[2023-05-12 18:21:18.547]   Number of CATV UNI ports:           0
+[2023-05-12 18:21:18.547]   Number of max CATV UNI adaptive:    -
+[2023-05-12 18:21:18.547]   Mapping mode:                       VLAN ID
+[2023-05-12 18:21:18.547]   The type of flow control:           PQ
+[2023-05-12 18:21:18.547]   ---------------------------------------------------------------------------
+[2023-05-12 18:21:18.547]   Binding times:                      0
+[2023-05-12 18:21:18.550]   ---------------------------------------------------------------------------
+[2023-05-12 18:21:18.550] 
+[2023-05-12 18:21:18.550] MA5800-X7(config)#
+	Done.

@@ -15,6 +15,8 @@
 ; Maximum length of string: 511 (see https://ttssh2.osdn.jp/manual/4/en/macro/syntax/types.html)
 
 ; === constant value ===
+SUPPORTED_OLT_FW_VER="MA5800V100R019C11"
+PROFILE_NAME_MAX_LEN=63
 MIN_GEMPORT_ID=128
 RESERVE_SERVICE_PORT_NO=10
 
@@ -34,7 +36,7 @@ CMD_RESPONSE_FAILURE="Failure"
 
 ; === setup default configuration file ===
 cfgFile=""
-;cfgFile="Z:\documents\OLT\Huawei MA5800-X7\TeraTermMacro\HuaweiMA5800-X7_ONT_GPT-5610C1_BSQA-ENV.cfg"
+;cfgFile="HuaweiMA5800-X7_ONT_GPT-5610C1_BSQA-ENV.cfg"
 
 ; === setup default value for global parameters(get form configuration file) ===
 op_mode=0
@@ -98,6 +100,7 @@ voip_max_connection=2
 
 
 ; === Internal parameters, will be auto-generate or temporary used ===
+oltFWver=""
 errorFlag=0
 finishSteps=0
 dataFinishSteps=0
@@ -156,9 +159,15 @@ endif
 logEnabled=0
 strlen log_file
 if result <> 0 then
+	strscan log_file ":"
+	if result == 0 then
+		; convert relative path to absolute path
+		getdir tmpStr
+		sprintf2 log_file "%s\%s" tmpStr log_file
+	endif
 	logopen log_file 0 0 1 1
 	if result <> 0 then
-		sprintf2 errMsg "fail to logging file: %s" log_file
+		sprintf2 errMsg "fail to open logging file: %s" log_file
 		goto errExit
 	endif
 	logEnabled=1
@@ -172,6 +181,19 @@ sendln "enable"
 wait PROMPT_ADMIN_CHAR
 sendln "config"
 wait PROMPT_CFG_MODE
+
+; === check OLT firmware version ===
+call getOLTfwVersion
+if result == 0 then
+	strcompare oltFWver SUPPORTED_OLT_FW_VER
+	if result <> 0 then
+		sprintf2 errMsg "This script only tested for firmware '%s', but current firmware is '%s'" SUPPORTED_OLT_FW_VER oltFWver
+		call askErrExit
+	endif
+else
+		sprintf2 errMsg "Can not get firmware version! This script only tested for firmware '%s'" SUPPORTED_OLT_FW_VER
+		call askErrExit
+endif
 
 ; === check configuration mode, must be 'distributing-mode' ===
 call chkCfgMode
@@ -1768,7 +1790,7 @@ return
 		else
 			groupmatchstr5="withoutSN"
 		endif
-		strjoin ont_desc "-" 5
+		strjoin ont_desc "_" 5
 	endif
 
 	; Data Service related configuration
@@ -2086,17 +2108,36 @@ return
 return
 
 
+:getOLTfwVersion
+	sendln "display version"
+	call waitCR
+	timeout=1
+	do
+		recvln
+		if result == 0 break;
+		strscan inputstr "VERSION : "
+		if result <> 0 then
+			wait PROMPT_CFG_MODE
+			strsplit inputstr ':'
+			if result <> 2 break
+			oltFWver = groupmatchstr2
+			strtrim oltFWver " "
+			result = 0
+			break
+		endif
+	loop
+:getOLTfwVersionExit
+	timeout=0
+return
+
+
 :askErrExit
-	strlen tmpStr
-	if result == 0 tmpStr="Error"
-	logwrite #13#10#13#10#9
-	logwrite tmpStr
-	logwrite ": "
+	logwrite #13#10#13#10#9'Warning: '
 	logwrite errMsg
 	logwrite #13#10
 	sendln
 
-	sprintf2 errMsg "%s\nAbort process?" errMsg
+	sprintf2 errMsg "%s\n\nAbort process?" errMsg
 	strspecial errMsg
 	yesnobox errMsg tmpStr
 	if result == 0 return
@@ -2136,7 +2177,7 @@ goto normalExit
 	; pass through
 :normalExit
 	if errorFlag == 0 then
-		logwrite #13#10#13#10#9'Done.'#13#10#13#10
+		logwrite #13#10#9'Done.'#13#10
 		sendln
 	endif
 	;--- it will cause MACRO failed if close logging/TeraTerm in unlink state
@@ -2147,6 +2188,7 @@ goto normalExit
 			sprintf2 cmdMsg "notepad %s" log_file
 			exec cmdMsg
 		endif
-		;closett
+		; do not close TeraTerm if not create log file!
+		if logEnabled <> 0 closett
 	endif
 end
