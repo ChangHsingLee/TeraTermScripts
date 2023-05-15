@@ -1,0 +1,708 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;                                                                     ;
+; This script uses to add/delete ONT profile on HUAWEI MA5800-X7 OLT. ;
+;                                                                     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; === Notes ===
+; Maximum length of string: 511 (see https://ttssh2.osdn.jp/manual/4/en/macro/syntax/types.html)
+
+; === constant value ===
+SUPPORTED_OLT_FW_VER="MA5800V100R019C11"
+PROFILE_NAME_MAX_LEN=33
+
+PROMPT_USER_CHAR=">"
+PROMPT_ADMIN_CHAR="#"
+PROMPT_DIAG_MODE="(diagnose)%%"
+PROMPT_CFG_MODE="(config)#"
+PROMPT_BTV_MODE="(config-btv)#"
+PROMPT_INPUT_CR_REGEX = "^{ <cr>.* }: $"
+PROMPT_YES_NO="(y/n)"
+
+CMD_RESPONSE_WRONG="locates at '^'"
+CMD_RESPONSE_FAILURE="Failure"
+
+; === setup default configuration file ===
+cfgFile=""
+;cfgFile="HuaweiMA5800-X7_DBA_Profile_DMS-4-10G.cfg"
+
+; === setup default value for global parameters(get form configuration file) ===
+op_mode=0
+log_file=""
+olt_ip="10.11.104.19"
+olt_user="RDtest"
+olt_passwd="RDtest1234"
+dba_profile_id=-1
+dba_profile=""
+dba_type=-1
+fixed_bandwidth=-1
+bandwidth_compensate=0
+bandwidth_compensate_str="no"
+fix_delay=0
+fix_delay_str="no"
+assured_bandwidth=-1
+max_bandwidth=-1
+priority=0
+weight=128
+additional_bandwidth=1
+additional_bandwidth_str="best-effort"
+
+; === Internal parameters, will be auto-generate or temporary used ===
+oltFWver=""
+profile_set_mode=0 ;0: unset, 1: name, 2: id, 3 name+id
+errorFlag=0
+logEnabled=0
+tmpStr=""
+tmpVal=0
+errMsg=""
+logMsg=""
+waitMsg=""
+cmdMsg=""
+
+
+; !!!! Program START !!!!
+; === Minimizes MACRO dialog box ===
+show 0
+
+; === check current version of TeraTerm, must uses version 4.78 or later ===
+getver ttVer "4.78"
+if result < 0 then
+	sprintf2 errMsg "TeraTerm version is v%s, it is too old, please migrate to v%s+" ttVer "4.78"
+	goto errExit
+endif
+
+; === find the configuration file ===
+call findCfgFile
+
+; === open/parse configuration file(read-only) ===
+call parseCfgFile
+
+; === sanity check ===
+call sanityCheck
+
+; === Terminates the link between the current TeraTerm window and MACRO ===
+;--- keep current TeraTerm window and create new TeraTerm window for next connection
+;unlink
+; === disconnect host/device connection if connection established ===
+;--- use current TeraTerm window for next connection
+testlink
+if result == 2 then
+	disconnect 0
+	waitevent 4
+endif
+
+; === create log file ===
+logEnabled=0
+strlen log_file
+if result <> 0 then
+	strscan log_file ":"
+	if result == 0 then
+		; convert relative path to absolute path
+		getdir tmpStr
+		sprintf2 log_file "%s\%s" tmpStr log_file
+	endif
+	logopen log_file 0 0 1 1
+	if result <> 0 then
+		sprintf2 errMsg "fail to open logging file: %s" log_file
+		goto errExit
+	endif
+	logEnabled=1
+endif
+
+; === connect to OLT management port ===
+call sshConnectOltMgmPort
+wait PROMPT_USER_CHAR
+;--- enter config mode
+sendln "enable"
+wait PROMPT_ADMIN_CHAR
+sendln "config"
+wait PROMPT_CFG_MODE
+
+; === check OLT firmware version ===
+call getOLTfwVersion
+if result == 0 then
+	strcompare oltFWver SUPPORTED_OLT_FW_VER
+	if result <> 0 then
+		sprintf2 errMsg "This script only tested for firmware '%s', but current firmware is '%s'" SUPPORTED_OLT_FW_VER oltFWver
+		call askErrExit
+	endif
+else
+		sprintf2 errMsg "Can not get firmware version! This script only tested for firmware '%s'" SUPPORTED_OLT_FW_VER
+		call askErrExit
+endif
+
+; === check configuration mode, must be 'distributing-mode' ===
+call chkCfgMode
+
+; === delete DBA profile first ===
+if op_mode >= 1 then
+	call deleteDBAprofile
+	if op_mode == 1 goto normalExit
+endif
+
+; === add DBA ===
+call addDBAprofile
+
+; === show DBA profile information
+if profile_set_mode & 1 then
+	sprintf2 cmdMsg "display dba-profile profile-name %s" dba_profile
+else
+	sprintf2 cmdMsg "display dba-profile profile-id %d" dba_profile_id
+endif
+sendln cmdMsg
+call waitCR
+wait PROMPT_CFG_MODE
+
+
+; !!!! Program STOP !!!!
+goto normalExit
+
+
+:addDBAprofile
+	cmdMsg = "dba-profile add"
+	if profile_set_mode & 1 then
+		sprintf2 cmdMsg "%s profile-name %s" cmdMsg dba_profile
+	endif
+	if profile_set_mode & 2 then
+		sprintf2 cmdMsg "%s profile-id %d" cmdMsg dba_profile_id
+	endif
+	sprintf2 cmdMsg "%s type%d" cmdMsg dba_type
+	if dba_type == 1 then
+		sprintf2 cmdMsg "%s fix %d bandwidth_compensate %s fix-delay %s" cmdMsg fixed_bandwidth bandwidth_compensate_str fix_delay_str
+	elseif dba_type == 2 then
+		sprintf2 cmdMsg "%s assure %d" cmdMsg assured_bandwidth
+	elseif dba_type == 3 then
+		sprintf2 cmdMsg "%s assure %d max %d" cmdMsg assured_bandwidth max_bandwidth
+	elseif dba_type == 4 then
+		sprintf2 cmdMsg "%s max %d priority %d weight %d" cmdMsg max_bandwidth priority weight
+	else
+		; dba_type == 5
+		sprintf2 cmdMsg "%s fix %d assure %d max %d additional_bandwidth %s" cmdMsg fixed_bandwidth assured_bandwidth max_bandwidth additional_bandwidth_str
+		if additional_bandwidth == 1 sprintf2 cmdMsg "%s priority %d weight %d" cmdMsg priority weight
+	endif
+	sendln cmdMsg
+	wait CMD_RESPONSE_FAILURE CMD_RESPONSE_WRONG "Profile name"
+	if result <> 3 then
+		errMsg = "Fail to add DBA profile, please check log/configuration file"
+		goto errExit
+	endif
+	wait PROMPT_CFG_MODE
+	logwrite #13#10#13#10#9'DBA Profile Added'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:deleteDBAprofile
+	timeout=1
+	tmpVal=0
+	if profile_set_mode & 1 then
+		sprintf2 cmdMsg "dba-profile delete profile-name %s" dba_profile
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+		if result == 0 tmpVal = tmpVal | 1
+	endif
+	if profile_set_mode & 2 then
+		sprintf2 cmdMsg "dba-profile delete profile-id %d" dba_profile_id
+		sendln cmdMsg
+		wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
+		if result == 0 tmpVal = tmpVal | 2
+	endif
+	timeout=0
+	if tmpVal == profile_set_mode logwrite #13#10#13#10#9'DBA Profile Deleted'#13#10#13#10
+	sendln
+	result=0
+return
+
+
+:chkCfgMode
+	sendln "diagnose"
+	wait PROMPT_DIAG_MODE
+	timeout=5
+	sendln "display xpon mode"
+	call waitCR
+	wait "distributing-mode" PROMPT_DIAG_MODE
+	if result <> 1 then
+		errMsg="Configuration mode is not 'distributing-mode'"
+		goto errExit
+	endif
+	sendln "config"
+	wait PROMPT_CFG_MODE
+	timeout=0
+	result=0
+return
+
+
+:parseCfgFile
+	fileopen fd cfgFile 0 1
+	lineNo=0
+	while 1
+		filereadln fd lineStr
+		;--- break loop if EOF
+		if result == 1 break
+
+		lineNo=lineNo+1
+		backupOrigLineStr=lineStr
+		;--- remove leading and trailing whitespace
+		strtrim lineStr ' '
+		;--- ignore empty/null string
+		strlen lineStr
+		if result == 0 then
+			continue
+		endif
+		;--- ignore comment
+		strcopy lineStr 1 1 tmpStr
+		strcompare tmpStr ";"
+		if result == 0 then
+			continue
+		endif
+		;dispstr #10#13 "line: " lineStr #10#13
+		strsplit lineStr '=' 2
+		if result <> 2 then
+			fileclose fd
+			sprintf2 errMsg "Wrong format at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+		;--- remove leading and trailing whitespace, to get key(groupmatchstr1) and value(groupmatchstr2)
+		strtrim groupmatchstr1 ' '
+		strtrim groupmatchstr2 ' '
+		;--- it will cause file open failed if not remove double quotes '"' from string of filename
+		strtrim groupmatchstr2 '"'
+		;dispstr #10#13 "key=" groupmatchstr1 " value=" groupmatchstr2 #10#13
+		strlen groupmatchstr2
+		if result == 0 then
+			fileclose fd
+			sprintf2 errMsg "Wrong setting at line %d of configuration file:\n\n   '%s'" lineNo backupOrigLineStr
+			goto errExit
+		endif
+
+		;--- parse parameters (key=OP_MODE, op_mode=value)
+		strcompare groupmatchstr1 "OP_MODE"
+		if result == 0 then
+			str2int op_mode groupmatchstr2
+			int2str tmpStr op_mode
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || op_mode < 0 || op_mode > 2 then
+				errMsg="Wrong value of 'OP_MODE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=LOG_FILE, log_file=value)
+		strcompare groupmatchstr1 "LOG_FILE"
+		if result == 0 then
+			log_file=groupmatchstr2
+			call updateLogFileName
+			if result <> 0 then
+				sprintf2 errMsg "Wrong format of log filename:\n\n   '%s'" log_file
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_IPv4, olt_ip=value)
+		strcompare groupmatchstr1 "OLT_MGM_IPv4"
+		if result == 0 then
+			olt_ip=groupmatchstr2
+			tmpStr=groupmatchstr2
+			call checkIPv4
+			if result <> 0 then
+				errMsg="Wrong format of 'OLT_MGM_IPv4'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_USER, olt_user=value)
+		strcompare groupmatchstr1 "OLT_MGM_USER"
+		if result == 0 then
+			olt_user=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=OLT_MGM_PASSWD, olt_passwd=value)
+		strcompare groupmatchstr1 "OLT_MGM_PASSWD"
+		if result == 0 then
+			olt_passwd=groupmatchstr2
+			continue
+		endif
+
+		;--- parse parameters (key=DBA_PROFILE, dba_profile=value)
+		strcompare groupmatchstr1 "DBA_PROFILE"
+		if result == 0 then
+			dba_profile = groupmatchstr2
+			strlen dba_profile
+			if result > PROFILE_NAME_MAX_LEN then
+				errMsg="Wrong value of 'DBA_PROFILE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			profile_set_mode = profile_set_mode | 1
+			continue
+		endif
+
+		;--- parse parameters (key=DBA_PROFILE_ID, dba_profile_id=value)
+		strcompare groupmatchstr1 "DBA_PROFILE_ID"
+		if result == 0 then
+			str2int dba_profile_id groupmatchstr2
+			int2str tmpStr dba_profile_id
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || dba_profile_id < 0 then
+				errMsg="Wrong value of 'DBA_PROFILE_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			profile_set_mode = profile_set_mode | 2
+			continue
+		endif
+
+		;--- parse parameters (key=DBA_TYPE, dba_type=value)
+		strcompare groupmatchstr1 "DBA_TYPE"
+		if result == 0 then
+			str2int dba_type groupmatchstr2
+			int2str tmpStr dba_type
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || dba_type < 1 || dba_type > 5 then
+				errMsg="Wrong value of 'DBA_TYPE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=FIXED_BANDWIDTH, fixed_bandwidth=value)
+		strcompare groupmatchstr1 "FIXED_BANDWIDTH"
+		if result == 0 then
+			str2int fixed_bandwidth groupmatchstr2
+			int2str tmpStr fixed_bandwidth
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || fixed_bandwidth < 128 || fixed_bandwidth > 10000000 then
+				errMsg="Wrong value of 'FIXED_BANDWIDTH'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=ASSURED_BANDWIDTH, assured_bandwidth=value)
+		strcompare groupmatchstr1 "ASSURED_BANDWIDTH"
+		if result == 0 then
+			str2int assured_bandwidth groupmatchstr2
+			int2str tmpStr assured_bandwidth
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || assured_bandwidth < 128 || assured_bandwidth > 10000000 then
+				errMsg="Wrong value of 'ASSURED_BANDWIDTH'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=MAX_BANDWIDTH, max_bandwidth=value)
+		strcompare groupmatchstr1 "MAX_BANDWIDTH"
+		if result == 0 then
+			str2int max_bandwidth groupmatchstr2
+			int2str tmpStr max_bandwidth
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || max_bandwidth < 128 || max_bandwidth > 10000000 then
+				errMsg="Wrong value of 'MAX_BANDWIDTH'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=BANDWIDTH_COMPENSATE, bandwidth_compensate=value)
+		strcompare groupmatchstr1 "BANDWIDTH_COMPENSATE"
+		if result == 0 then
+			str2int bandwidth_compensate groupmatchstr2
+			int2str tmpStr bandwidth_compensate
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || bandwidth_compensate < 0 || bandwidth_compensate > 1 then
+				errMsg="Wrong value of 'BANDWIDTH_COMPENSATE'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			if bandwidth_compensate == 0 then
+				bandwidth_compensate_str ="no"
+			else
+				bandwidth_compensate_str ="yes"
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=FIX_DELAY, fix_delay=value)
+		strcompare groupmatchstr1 "FIX_DELAY"
+		if result == 0 then
+			str2int fix_delay groupmatchstr2
+			int2str tmpStr fix_delay
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || fix_delay < 0 || fix_delay > 1 then
+				errMsg="Wrong value of 'FIX_DELAY'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			if fix_delay == 0 then
+				fix_delay_str = "no"
+			else
+				fix_delay_str = "yes"
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=PRIORITY, priority=value)
+		strcompare groupmatchstr1 "PRIORITY"
+		if result == 0 then
+			str2int priority groupmatchstr2
+			int2str tmpStr priority
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || priority < 0 || priority > 7 then
+				errMsg="Wrong value of 'PRIORITY'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=WEIGHT, weight=value)
+		strcompare groupmatchstr1 "WEIGHT"
+		if result == 0 then
+			str2int weight groupmatchstr2
+			int2str tmpStr weight
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || weight < 1 || weight > 10000 then
+				errMsg="Wrong value of 'WEIGHT'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=ADDITIONAL_BANDWIDTH, additional_bandwidth=value)
+		strcompare groupmatchstr1 "ADDITIONAL_BANDWIDTH"
+		if result == 0 then
+			str2int additional_bandwidth groupmatchstr2
+			int2str tmpStr additional_bandwidth
+			strcompare groupmatchstr2 tmpStr
+			if result <> 0 || additional_bandwidth < 0 || additional_bandwidth > 0 then
+				errMsg="Wrong value of 'ADDITIONAL_BANDWIDTH'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			if additional_bandwidth == 0 then
+				additional_bandwidth_str = "no"
+			else
+				additional_bandwidth_str = "yes"
+			endif
+			continue
+		endif
+	endwhile
+	fileclose fd
+return
+
+
+:sanityCheck
+	; check parameters of BDA profile
+	if profile_set_mode == 0 then
+		errMsg="You must specify DBA_PROFILE or/and DBA_PROFILE_ID\nPlease update your configuration file!"
+		goto errExit
+	endif
+	if dba_type < 0 then
+		errMsg="You must specify DBA_TYPE\nPlease update your configuration file!"
+		goto errExit
+	endif
+	if (dba_type == 1 || dba_type == 5) && fixed_bandwidth < 0 then
+		errMsg="You must specify FIXED_BANDWIDTH\nPlease update your configuration file!"
+		goto errExit
+	endif
+	if dba_type <> 1 && dba_type <> 4 && assured_bandwidth < 0 then
+		errMsg="You must specify ASSURED_BANDWIDTH\nPlease update your configuration file!"
+		goto errExit
+	endif
+	if dba_type <> 1 && dba_type <> 2 && max_bandwidth < 0 then
+		errMsg="You must specify MAX_BANDWIDTH\nPlease update your configuration file!"
+		goto errExit
+	endif
+	result=0
+return
+
+
+:findCfgFile
+	strlen cfgFile
+	if result == 0 then
+	; get configuration filename if not declare 'cfgFile'
+		filenamebox "Select config file" 0
+		if result == 0 then
+			end
+		endif
+		cfgFile = inputstr
+	else
+	; check configuration file exist or not
+		getfileattr cfgFile
+		if result == -1 then
+			sprintf2 errMsg "Can not open configuration file:\n%s" cfgFile
+			goto errExit
+		endif
+	endif
+return
+
+
+:updateLogFileName
+	gettime timeStr "%Y%m%d-%H%M%S"
+	strsplit log_file '.' 2
+	if result <> 2 goto errUpdateLogFileName
+	sprintf2 log_file "%s_%s.%s" groupmatchstr1 timeStr groupmatchstr2
+	;dispstr #10#13 "log file=" log_file #10#13
+	result=0
+	return
+:errUpdateLogFileName
+	result=1
+return
+
+
+;--- needs arguments: olt_ip, olt_user, olt_passwd
+:sshConnectOltMgmPort
+	strdim selectMsg 4
+	selectMsg[0] = "Try again"
+	selectMsg[1] = "Change IP Address of OLT management port"
+	selectMsg[2] = "Exit"
+	testlink
+	while result != 2
+		sprintf2 sshCmd "%s:22 /ssh /2 /auth=password /user=%s /passwd=%s /nosecuritywarning" olt_ip olt_user olt_passwd
+		connect sshCmd
+		if result == 2 break
+		sprintf2 msg "ssh: connect to '%s' port 22: Connection timed out!" olt_ip
+		listbox msg "select" selectMsg 1
+		if result == 0 continue
+		if result == 2 || result == -1 goto normalExit
+		inputbox "Input IP address of OLT management port"#13#10"        (Abort program if empty)" "input" olt_ip
+		strlen inputstr
+		if result <= 0 goto normalExit
+		olt_ip = inputstr
+	endwhile
+	;--- WORKAROUND: command 'connect' will not return failed if user name or password are incorrect!
+	mpause 1500
+	testlink
+	if result < 2 then
+		errMsg="user name or password incorrect, please update your configuration file!"
+		goto errExit
+	endif
+return
+
+
+:checkIPv4
+	strsplit tmpStr "."
+	if result <> 4 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr1
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr1 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr2
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr2 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr3
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr3 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	str2int tmpVal groupmatchstr4
+	int2str tmpStr tmpVal
+	strcompare groupmatchstr4 tmpStr
+	if result <> 0 goto errCheckIPv4
+	if tmpVal<0 || tmpVal>255 goto errCheckIPv4
+
+	result = 0
+	return
+:errCheckIPv4
+	result = 1
+return
+
+
+:waitCR
+	waitregex PROMPT_INPUT_CR_REGEX "error locates at '\^'"
+	if result <> 1 then
+		sprintf2 errMsg "Parameter error!(%d)" result
+		;errMsg="Parameter error!"
+		goto errExit
+	endif
+	sendln
+return
+
+
+:back2CfgMode
+	timeout=0
+	sendln "quit"
+	wait PROMPT_CFG_MODE
+return
+
+
+:getOLTfwVersion
+	sendln "display version"
+	call waitCR
+	timeout=1
+	do
+		recvln
+		if result == 0 break;
+		strscan inputstr "VERSION : "
+		if result <> 0 then
+			wait PROMPT_CFG_MODE
+			strsplit inputstr ':'
+			if result <> 2 break
+			oltFWver = groupmatchstr2
+			strtrim oltFWver " "
+			result = 0
+			break
+		endif
+	loop
+:getOLTfwVersionExit
+	timeout=0
+return
+
+
+:askErrExit
+	logwrite #13#10#13#10#9'Warning: '
+	logwrite errMsg
+	logwrite #13#10
+	sendln
+
+	sprintf2 errMsg "%s\n\nAbort process?" errMsg
+	strspecial errMsg
+	yesnobox errMsg tmpStr
+	if result == 0 return
+
+	logwrite #13#10#9#9
+	logwrite "!!! Abort Process !!!"
+	logwrite #13#10#13#10
+	sendln
+	errorFlag=1
+goto normalExit
+
+
+:errExit
+	strlen errMsg
+	if result <> 0 then
+		strspecial errMsg
+		messagebox errMsg "Error"
+		logwrite #13#10#13#10#9
+		logwrite errMsg
+		logwrite #13#10#9#9
+		logwrite "!!! Abort Process !!!"
+		logwrite #13#10#13#10
+		sendln
+	endif
+	errorFlag=1
+	; pass through
+:normalExit
+	if errorFlag == 0 then
+		logwrite #13#10#9'Done.'#13#10
+		sendln
+	endif
+	;--- it will cause MACRO failed if close logging/TeraTerm in unlink state
+	testlink
+	if result >= 1 then
+		if logEnabled <> 0 then
+			logclose
+			sprintf2 cmdMsg "notepad %s" log_file
+			exec cmdMsg
+		endif
+		; do not close TeraTerm if not create log file!
+		if logEnabled <> 0 closett
+	endif
+end
