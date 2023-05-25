@@ -206,7 +206,7 @@ if op_mode >= 1 then
 	dataFinishSteps=6
 	call deleteDataService
 	iptvFinishSteps=8
-	call deleteIpevService
+	call deleteIptvService
 	voipFinishSteps=6
 	call deleteVoipService
 	finishSteps=1
@@ -451,9 +451,9 @@ return
 return
 
 
-:deleteIpevService
+:deleteIptvService
 	deleteIptvServiceFailed=0
-	if iptvFinishSteps <=0 goto exitDeleteIptvService
+	if iptvFinishSteps <=0 || iptvServiceEnabled == 0 goto exitDeleteIptvService
 	tmpStr="Fail to delete iptv service"
 	while iptvFinishSteps >= 7
 		if iptvFinishSteps == 8 then
@@ -676,7 +676,7 @@ return
 
 :deleteDataService
 	deleteDataServiceFailed=0
-	if dataFinishSteps <=0 goto exitDeleteDataService
+	if dataFinishSteps <=0 || dataServiceEnabled == 0 goto exitDeleteDataService
 	tmpStr="Fail to delete data service"
 	if dataFinishSteps == 6 then
 		timeout=1
@@ -864,7 +864,7 @@ return
 
 :deleteVoipService
 	deleteVoipServiceFailed=0
-	if voipFinishSteps <=0 goto exitDeleteVoipService
+	if voipFinishSteps <=0 || voipServiceEnabled == 0 goto exitDeleteVoipService
 	tmpStr="Fail to delete voip service"
 	if voipFinishSteps == 6 then
 		timeout=1
@@ -2166,7 +2166,7 @@ goto normalExit
 		logwrite #13#10#13#10
 		sendln
 	endif
-	call deleteIpevService
+	call deleteIptvService
 	call deleteDataService
 	call deleteVoipService
 	while finishSteps>0
