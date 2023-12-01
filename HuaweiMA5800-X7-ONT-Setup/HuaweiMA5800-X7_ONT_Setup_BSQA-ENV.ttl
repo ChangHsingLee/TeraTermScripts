@@ -65,6 +65,7 @@ data_service_type="eth"
 data_gemport_encrypt="on"
 data_pqn=0
 data_uni_vlan_id=3000
+data_gem_vlan_id=288
 data_ani_vlan_id=204
 data_port_id=-1
 data_port_desc=""
@@ -78,6 +79,7 @@ iptv_service_type="eth"
 iptv_gemport_encrypt="on"
 iptv_pqn=2
 iptv_uni_vlan_id=2
+iptv_gem_vlan_id=2
 iptv_ani_vlan_id=600
 iptv_port_id=-1
 iptv_port_desc=""
@@ -93,6 +95,7 @@ voip_service_type="eth"
 voip_gemport_encrypt="on"
 voip_pqn=3
 voip_uni_vlan_id=3
+voip_gem_vlan_id=3
 voip_ani_vlan_id=408
 voip_port_id=-1
 voip_port_desc=""
@@ -350,8 +353,8 @@ return
 		goto errExit
 	endif
 	iptvFinishSteps = iptvFinishSteps + 1
-	; 4. GEM port mapping
-	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id iptv_gemport_id iptv_uni_vlan_id
+	; 4. Setup GEM port VLAN ID
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id iptv_gemport_id iptv_gem_vlan_id
 	sendln cmdMsg
 	call waitCR
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
@@ -360,11 +363,20 @@ return
 		goto errExit
 	endif
 	iptvFinishSteps = iptvFinishSteps + 1
-	; 5. setup ONT port VLAN for iptv service
+	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for iptv service
 	if ont_eth_ports > 1 then
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports iptv_uni_vlan_id
+        ; UNI port untagged
+        if iptv_uni_vlan_id == 0 then
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports iptv_gem_vlan_id
+        else
+            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports iptv_gem_vlan_id
+        endif
 	else
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id iptv_uni_vlan_id
+        if iptv_uni_vlan_id == 0 then
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports iptv_gem_vlan_id
+        else
+            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id iptv_gem_vlan_id
+        endif
 	endif
 	sendln cmdMsg
 	call waitCR
@@ -376,7 +388,7 @@ return
 	iptvFinishSteps = iptvFinishSteps + 1
 	; 6. multicast-forward
 	timeout=1
-	sprintf2 cmdMsg "ont multicast-forward %d %d tag translation %d" oltDownlinkPortID ont_id iptv_uni_vlan_id
+	sprintf2 cmdMsg "ont multicast-forward %d %d tag translation %d" oltDownlinkPortID ont_id iptv_gem_vlan_id
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE
 	if result <> 0 then
@@ -387,7 +399,7 @@ return
 	iptvFinishSteps = iptvFinishSteps + 1
 	call back2CfgMode
 	; 7. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" iptv_port_id iptv_ani_vlan_id olt_downlinkStr iptv_gemport_id iptv_uni_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" iptv_port_id iptv_ani_vlan_id olt_downlinkStr iptv_gemport_id iptv_gem_vlan_id
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -507,9 +519,9 @@ return
 		endif
 		if iptvFinishSteps == 5 then
 			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id iptv_uni_vlan_id
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -613,8 +625,8 @@ return
 		goto errExit
 	endif
 	dataFinishSteps = dataFinishSteps + 1
-	; 4. GEM port mapping
-	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id data_gemport_id data_uni_vlan_id
+	; 4. Setup GEM port VLAN ID
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id data_gemport_id data_gem_vlan_id
 	sendln cmdMsg
 	call waitCR
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
@@ -623,11 +635,20 @@ return
 		goto errExit
 	endif
 	dataFinishSteps = dataFinishSteps + 1
-	; 5. setup ONT port VLAN for data service
+	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for iptv service
 	if ont_eth_ports > 1 then
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports data_uni_vlan_id
+		; UNI port untagged
+		if data_uni_vlan_id == 0 then
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports data_gem_vlan_id
+		else
+			sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports data_gem_vlan_id
+		endif
 	else
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id data_uni_vlan_id
+		if data_uni_vlan_id == 0 then
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports data_gem_vlan_id
+		else
+			sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id data_gem_vlan_id
+		endif
 	endif
 	sendln cmdMsg
 	call waitCR
@@ -639,7 +660,7 @@ return
 	dataFinishSteps = dataFinishSteps + 1
 	call back2CfgMode
 	; 6. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" data_port_id data_ani_vlan_id olt_downlinkStr data_gemport_id data_uni_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" data_port_id data_ani_vlan_id olt_downlinkStr data_gemport_id data_gem_vlan_id
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -740,9 +761,9 @@ return
 		endif
 		if dataFinishSteps == 5 then
 			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id data_uni_vlan_id
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -801,8 +822,8 @@ return
 		goto errExit
 	endif
 	voipFinishSteps = voipFinishSteps + 1
-	; 4. GEM port mapping
-	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id voip_gemport_id voip_uni_vlan_id
+	; 4. Setup GEM port VLAN ID
+	sprintf2 cmdMsg "ont gemport mapping %d %d %d vlan %d" oltDownlinkPortID ont_id voip_gemport_id voip_gem_vlan_id
 	sendln cmdMsg
 	call waitCR
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "successfully"
@@ -811,11 +832,20 @@ return
 		goto errExit
 	endif
 	voipFinishSteps = voipFinishSteps + 1
-	; 5. setup ONT port VLAN for voip service
+	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for voip service
 	if ont_eth_ports > 1 then
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports voip_uni_vlan_id
+        ; UNI port untagged
+        if voip_uni_vlan_id == 0 then
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports voip_gem_vlan_id
+        else
+            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports voip_gem_vlan_id
+        fi
 	else
-		sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id voip_uni_vlan_id
+        if voip_uni_vlan_id == 0 then
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports voip_gem_vlan_id
+        else
+            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id voip_gem_vlan_id
+        fi
 	endif
 	sendln cmdMsg
 	call waitCR
@@ -827,7 +857,7 @@ return
 	voipFinishSteps = voipFinishSteps + 1
 	call back2CfgMode
 	; 6. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" voip_port_id voip_ani_vlan_id olt_downlinkStr voip_gemport_id voip_uni_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" voip_port_id voip_ani_vlan_id olt_downlinkStr voip_gemport_id voip_gem_vlan_id
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -928,9 +958,9 @@ return
 		endif
 		if voipFinishSteps == 5 then
 			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1-%d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d 1" oltDownlinkPortID ont_id voip_uni_vlan_id
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -991,7 +1021,7 @@ return
 	result=0
 return
 
-
+; we use distribud mode not profile mode
 :chkCfgMode
 	sendln "diagnose"
 	wait PROMPT_DIAG_MODE
@@ -1361,6 +1391,18 @@ return
 			continue
 		endif
 
+		;--- parse parameters (key=DATA_GEMPORT_VLAN_ID, data_gem_vlan_id=value)
+		strcompare groupmatchstr1 "DATA_GEMPORT_VLAN_ID"
+		if result == 0 then
+			str2int data_gem_vlan_id groupmatchstr2
+			int2str tmpStr data_gem_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_gem_vlan_id < 0 then
+				errMsg="Wrong value of 'DATA_GEMPORT_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
 		;--- parse parameters (key=DATA_SERVICE_PORT_ID, data_port_id=value)
 		strcompare groupmatchstr1 "DATA_SERVICE_PORT_ID"
 		if result == 0 then
@@ -1514,6 +1556,18 @@ return
 			continue
 		endif
 
+		;--- parse parameters (key=IPTV_GEMPORT_VLAN_ID, iptv_gem_vlan_id=value)
+		strcompare groupmatchstr1 "IPTV_GEMPORT_VLAN_ID"
+		if result == 0 then
+			str2int iptv_gem_vlan_id groupmatchstr2
+			int2str tmpStr iptv_gem_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_gem_vlan_id < 0 then
+				errMsg="Wrong value of 'IPTV_GEMPORT_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
 		;--- parse parameters (key=IPTV_ANI_VLAN_ID, iptv_ani_vlan_id=value)
 		strcompare groupmatchstr1 "IPTV_ANI_VLAN_ID"
 		if result == 0 then
@@ -1692,6 +1746,18 @@ return
 			continue
 		endif
 
+		;--- parse parameters (key=VOIP_GEMPORT_VLAN_ID, voip_gem_vlan_id=value)
+		strcompare groupmatchstr1 "VOIP_GEMPORT_VLAN_ID"
+		if result == 0 then
+			str2int voip_gem_vlan_id groupmatchstr2
+			int2str tmpStr voip_gem_vlan_id
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_gem_vlan_id < 0 then
+				errMsg="Wrong value of 'VOIP_GEMPORT_VLAN_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
 		;--- parse parameters (key=VOIP_ANI_VLAN_ID, voip_ani_vlan_id=value)
 		strcompare groupmatchstr1 "VOIP_ANI_VLAN_ID"
 		if result == 0 then
