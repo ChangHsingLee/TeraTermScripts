@@ -26,7 +26,7 @@ PROMPT_DIAG_MODE="(diagnose)%%"
 PROMPT_CFG_MODE="(config)#"
 PROMPT_BTV_MODE="(config-btv)#"
 PROMPT_INPUT_CR_REGEX = "^{ <cr>.* }: $"
-;PROMPT_INPUT_CR_K="{ <cr>||<K> }:"
+PROMPT_INPUT_CR_K="{ <cr>||<K> }:"
 ;PROMPT_INPUT_CR_CASCADE="{ <cr>|cascade<K> }:"
 ;PROMPT_INPUT_CR_DOWNSTREAM_PQ="{ <cr>|downstream-priority-queue<K> }:"
 PROMPT_YES_NO="(y/n)"
@@ -52,10 +52,12 @@ ont_profile=""
 ont_speedStr="auto"
 ont_auth_type=0
 ont_eth_ports=1
+portListStr="1"
 pon_sn=""
 ploam_passwd_str=""
 ploam_passwd_hex=""
 tcont0_dba_id=2
+untaggedUserEncap=1
 
 data_tcont_id=2
 data_dba_profile=""
@@ -144,6 +146,16 @@ call findCfgFile
 ; === open/parse configuration file(read-only) ===
 call parseCfgFile
 
+; === Change/Force operation mode (add/del/del+add ONT) ===
+call forceOPmode
+
+; === update log filename ===
+call updateLogFileName
+if result <> 0 then
+    sprintf2 errMsg "Wrong format of log filename:\n\n   '%s'" log_file
+    goto errExit
+endif
+
 ; === sanity check ===
 call sanityCheck
 
@@ -230,9 +242,11 @@ call addDataService
 call addVoipService
 
 ; === show ONT information
-sprintf2 cmdMsg "display ont info %d %d %d %d" oltDownlinkFrameID oltDownlinkSlotID oltDownlinkPortID ont_id
-sendln cmdMsg
-wait PROMPT_CFG_MODE
+;sprintf2 cmdMsg "display ont info %d %d %d %d" oltDownlinkFrameID oltDownlinkSlotID oltDownlinkPortID ont_id
+;sendln cmdMsg
+;wait PROMPT_INPUT_CR_K
+;sendln
+;wait PROMPT_ADMIN_CHAR
 
 ; !!!! Program STOP !!!!
 goto normalExit
@@ -364,19 +378,18 @@ return
 	endif
 	iptvFinishSteps = iptvFinishSteps + 1
 	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for iptv service
-	if ont_eth_ports > 1 then
-        ; UNI port untagged
-        if iptv_uni_vlan_id == 0 then
-            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports iptv_gem_vlan_id
-        else
-            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id ont_eth_ports iptv_gem_vlan_id
-        endif
+	if iptv_uni_vlan_id == 0 then
+		; UNI port untagged
+		sprintf2 cmdMsg "ont native-vlan %d %d unconcern" oltDownlinkPortID ont_id
+		sendln cmdMsg
+		wait PROMPT_ADMIN_CHAR
+		if untaggedUserEncap <> 0 then
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr iptv_gem_vlan_id
+		else
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr iptv_gem_vlan_id
+		endif
 	else
-        if iptv_uni_vlan_id == 0 then
-            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports iptv_gem_vlan_id
-        else
-            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id iptv_gem_vlan_id
-        endif
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d %s translation s-vlan %d" oltDownlinkPortID ont_id iptv_uni_vlan_id portListStr iptv_gem_vlan_id
 	endif
 	sendln cmdMsg
 	call waitCR
@@ -518,10 +531,14 @@ return
 			iptvFinishSteps = iptvFinishSteps - 1
 		endif
 		if iptvFinishSteps == 5 then
-			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
+			if iptv_uni_vlan_id <> 0 then
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d %s" oltDownlinkPortID ont_id iptv_uni_vlan_id portListStr
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
+				if untaggedUserEncap <> 0 then
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged IPoE %s" oltDownlinkPortID ont_id portListStr
+				else
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged %s" oltDownlinkPortID ont_id portListStr
+				endif
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -636,19 +653,15 @@ return
 	endif
 	dataFinishSteps = dataFinishSteps + 1
 	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for iptv service
-	if ont_eth_ports > 1 then
+	if data_uni_vlan_id == 0 then
 		; UNI port untagged
-		if data_uni_vlan_id == 0 then
-			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports data_gem_vlan_id
+		if untaggedUserEncap <> 0 then
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr data_gem_vlan_id
 		else
-			sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id ont_eth_ports data_gem_vlan_id
+			sprintf2 cmdMsg "ont port vlan %d %d eth untagged %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr data_gem_vlan_id
 		endif
 	else
-		if data_uni_vlan_id == 0 then
-			sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports data_gem_vlan_id
-		else
-			sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id data_gem_vlan_id
-		endif
+		sprintf2 cmdMsg "ont port vlan %d %d eth %d %s translation s-vlan %d" oltDownlinkPortID ont_id data_uni_vlan_id portListStr data_gem_vlan_id
 	endif
 	sendln cmdMsg
 	call waitCR
@@ -760,10 +773,15 @@ return
 			dataFinishSteps = dataFinishSteps - 1
 		endif
 		if dataFinishSteps == 5 then
-			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
+			if data_uni_vlan_id <> 0 then
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d %s" oltDownlinkPortID ont_id data_uni_vlan_id portListStr
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
+				; UNI port untagged
+				if untaggedUserEncap <> 0 then
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged IPoE %s" oltDownlinkPortID ont_id portListStr
+				else
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged %s" oltDownlinkPortID ont_id portListStr
+				endif
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -833,20 +851,16 @@ return
 	endif
 	voipFinishSteps = voipFinishSteps + 1
 	; 5. setup ONT(UNI) port VLAN translate to GEM port VLAN for voip service
-	if ont_eth_ports > 1 then
+    if voip_uni_vlan_id == 0 then
         ; UNI port untagged
-        if voip_uni_vlan_id == 0 then
-            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1-%d q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports voip_gem_vlan_id
+        if untaggedUserEncap <> 0 then
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr voip_gem_vlan_id
         else
-            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1-%d translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id ont_eth_ports voip_gem_vlan_id
-        fi
-	else
-        if voip_uni_vlan_id == 0 then
-            sprintf2 cmdMsg "ont port vlan %d %d eth untagged user-encap IPoE 1 q-in-q s-vlan %d" oltDownlinkPortID ont_id ont_eth_ports voip_gem_vlan_id
-        else
-            sprintf2 cmdMsg "ont port vlan %d %d eth %d 1 translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id voip_gem_vlan_id
-        fi
-	endif
+            sprintf2 cmdMsg "ont port vlan %d %d eth untagged %s q-in-q s-vlan %d" oltDownlinkPortID ont_id portListStr voip_gem_vlan_id
+        endif
+    else
+        sprintf2 cmdMsg "ont port vlan %d %d eth %d %s translation s-vlan %d" oltDownlinkPortID ont_id voip_uni_vlan_id portListStr voip_gem_vlan_id
+    fi
 	sendln cmdMsg
 	call waitCR
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -957,10 +971,15 @@ return
 			voipFinishSteps = voipFinishSteps - 1
 		endif
 		if voipFinishSteps == 5 then
-			if ont_eth_ports > 1 then
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1-%d" oltDownlinkPortID ont_id ont_eth_ports
+			if voip_uni_vlan_id <> 0 then
+				; UNI port untagged
+				sprintf2 cmdMsg "undo ont port vlan %d %d eth %d %s" oltDownlinkPortID ont_id voip_uni_vlan_id portListStr
 			else
-				sprintf2 cmdMsg "undo ont port vlan %d %d eth all 1" oltDownlinkPortID ont_id
+				if untaggedUserEncap <> 0 then
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged IPoE %s" oltDownlinkPortID ont_id portListStr
+				else
+					sprintf2 cmdMsg "undo ont port vlan %d %d eth untagged %s" oltDownlinkPortID ont_id portListStr
+				endif
 			endif
 			sendln cmdMsg
 			wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE "failed: 0"
@@ -1100,11 +1119,6 @@ return
 		strcompare groupmatchstr1 "LOG_FILE"
 		if result == 0 then
 			log_file=groupmatchstr2
-			call updateLogFileName
-			if result <> 0 then
-				sprintf2 errMsg "Wrong format of log filename:\n\n   '%s'" log_file
-				goto errExit
-			endif
 			continue
 		endif
 
@@ -1259,6 +1273,11 @@ return
 			if result <> 0 || ont_eth_ports < 1 then
 				errMsg="Wrong value of 'ONT_ETH_PORTS'\nPlease update your configuration file!"
 				goto errExit
+			endif
+			if ont_eth_ports > 1 then
+				sprintf2 portListStr "1-%d" ont_eth_ports
+			else
+				sprintf2 portListStr "1"
 			endif
 			continue
 		endif
@@ -1568,6 +1587,7 @@ return
 			endif
 			continue
 		endif
+
 		;--- parse parameters (key=IPTV_ANI_VLAN_ID, iptv_ani_vlan_id=value)
 		strcompare groupmatchstr1 "IPTV_ANI_VLAN_ID"
 		if result == 0 then
@@ -1854,7 +1874,7 @@ return
 		if ont_auth_type <> 1 then
 			groupmatchstr5=pon_sn
 		else
-			groupmatchstr5="withoutSN"
+			groupmatchstr5="passwd-auth"
 		endif
 		strjoin ont_desc "_" 5
 	endif
@@ -2017,6 +2037,20 @@ return
 return
 
 
+;--- will update argument: op_mode
+:forceOPmode
+	strdim opModeMsg 4
+	opModeMsg[0] = "Add ONT"
+	opModeMsg[1] = "Del ONT"
+	opModeMsg[2] = "Del ONT + Add ONT"
+	opModeMsg[3] = "Do not replace"
+	listbox "Replace operation mode in config file" "select" opModeMsg 1
+    if result >= 0 && result <= 2 then
+        op_mode = result
+    endif
+return
+
+
 :findCfgFile
 	strlen cfgFile
 	if result == 0 then
@@ -2037,11 +2071,16 @@ return
 return
 
 
+;--- needs argument: op_mode
 :updateLogFileName
+	strdim opModeStr 3
+	opModeStr[0] = "add"
+	opModeStr[1] = "del"
+	opModeStr[2] = "del+add"
 	gettime timeStr "%Y%m%d-%H%M%S"
 	strsplit log_file '.' 2
 	if result <> 2 goto errUpdateLogFileName
-	sprintf2 log_file "%s_%s.%s" groupmatchstr1 timeStr groupmatchstr2
+	sprintf2 log_file "%s_%s_%s.%s" groupmatchstr1 opModeStr[op_mode] timeStr groupmatchstr2
 	;dispstr #10#13 "log file=" log_file #10#13
 	result=0
 	return
