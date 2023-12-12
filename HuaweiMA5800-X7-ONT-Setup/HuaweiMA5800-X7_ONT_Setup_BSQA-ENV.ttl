@@ -34,12 +34,31 @@ PROMPT_YES_NO="(y/n)"
 CMD_RESPONSE_WRONG="locates at '^'"
 CMD_RESPONSE_FAILURE="Failure"
 
+strdim replaceOPmsg 4
+replaceOPmsg[0] = "Add ONT"
+replaceOPmsg[1] = "Del ONT"
+replaceOPmsg[2] = "Del ONT + Add ONT"
+replaceOPmsg[3] = "Do not replace"
+
+strdim logFileOPstr 3
+logFileOPstr[0] = "add"
+logFileOPstr[1] = "del"
+logFileOPstr[2] = "del+add"
+
+strdim ipRetryMsg 3
+ipRetryMsg[0] = "Try again"
+ipRetryMsg[1] = "Change IP Address of OLT management port"
+ipRetryMsg[2] = "Exit"
+
+
+:nextCfg
 ; === setup default configuration file ===
 cfgFile=""
 ;cfgFile="HuaweiMA5800-X7_ONT_GPT-5610C1_BSQA-ENV.cfg"
 
 ; === setup default value for global parameters(get form configuration file) ===
 op_mode=0
+untaggedUserEncap=0
 log_file=""
 olt_ip="10.11.104.19"
 olt_user="RDtest"
@@ -57,7 +76,6 @@ pon_sn=""
 ploam_passwd_str=""
 ploam_passwd_hex=""
 tcont0_dba_id=2
-untaggedUserEncap=1
 
 data_tcont_id=2
 data_dba_profile=""
@@ -72,6 +90,8 @@ data_ani_vlan_id=204
 data_port_id=-1
 data_port_desc=""
 data_max_connection=1
+data_i_ttidx=7
+data_o_ttidx=7
 
 iptv_tcont_id=1
 iptv_dba_profile=""
@@ -88,6 +108,8 @@ iptv_port_desc=""
 iptv_max_program=4
 iptv_multicast_vlan_list="509,1218"
 iptv_igmp_profile_list=""
+iptv_i_ttidx=7
+iptv_o_ttidx=7
 
 voip_tcont_id=3
 voip_dba_profile=""
@@ -102,6 +124,8 @@ voip_ani_vlan_id=408
 voip_port_id=-1
 voip_port_desc=""
 voip_max_connection=2
+voip_i_ttidx=7
+voip_o_ttidx=7
 
 
 ; === Internal parameters, will be auto-generate or temporary used ===
@@ -130,6 +154,24 @@ oltDownlinkPortID=0
 
 
 ; !!!! Program START !!!!
+; === Terminates the link between the current TeraTerm window and MACRO ===
+testlink
+if result == 2 then
+	;--- keep current TeraTerm window and create new TeraTerm window for next connection
+	unlink
+	connect ''
+endif
+testlink
+if result == 0 then
+	;---- TeraTerm(window) will be disconnected if use command "disconnect 0" to disconnect telnet/ssh session. need to reconnect to TeraTerm!
+	connect ''
+	; wait for Link to Tera Term & Connection to the host
+	waitevent 8
+	disconnect 0
+	; wait for disconnect from host
+	waitevent 4
+endif
+
 ; === Minimizes MACRO dialog box ===
 show 0
 
@@ -158,17 +200,6 @@ endif
 
 ; === sanity check ===
 call sanityCheck
-
-; === Terminates the link between the current TeraTerm window and MACRO ===
-;--- keep current TeraTerm window and create new TeraTerm window for next connection
-;unlink
-; === disconnect host/device connection if connection established ===
-;--- use current TeraTerm window for next connection
-testlink
-if result == 2 then
-	disconnect 0
-	waitevent 4
-endif
 
 ; === create log file ===
 logEnabled=0
@@ -412,7 +443,7 @@ return
 	iptvFinishSteps = iptvFinishSteps + 1
 	call back2CfgMode
 	; 7. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" iptv_port_id iptv_ani_vlan_id olt_downlinkStr iptv_gemport_id iptv_gem_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table index %d outbound traffic-table index %d" iptv_port_id iptv_ani_vlan_id olt_downlinkStr iptv_gemport_id iptv_gem_vlan_id iptv_i_ttidx iptv_o_ttidx
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -673,7 +704,7 @@ return
 	dataFinishSteps = dataFinishSteps + 1
 	call back2CfgMode
 	; 6. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" data_port_id data_ani_vlan_id olt_downlinkStr data_gemport_id data_gem_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table index %d outbound traffic-table index %d" data_port_id data_ani_vlan_id olt_downlinkStr data_gemport_id data_gem_vlan_id data_i_ttidx data_o_ttidx
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -871,7 +902,7 @@ return
 	voipFinishSteps = voipFinishSteps + 1
 	call back2CfgMode
 	; 6. create service port
-	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table name No_limit_Copy_Pbit outbound traffic-table name No_limit_Copy_Pbit" voip_port_id voip_ani_vlan_id olt_downlinkStr voip_gemport_id voip_gem_vlan_id
+	sprintf2 cmdMsg "service-port %d vlan %d gpon %s gemport %d multi-service user-vlan %d tag-transform translate inbound traffic-table index %d outbound traffic-table index %d" voip_port_id voip_ani_vlan_id olt_downlinkStr voip_gemport_id voip_gem_vlan_id voip_i_ttidx voip_o_ttidx
 	sendln cmdMsg
 	wait CMD_RESPONSE_WRONG CMD_RESPONSE_FAILURE PROMPT_CFG_MODE
 	if result <> 3 then
@@ -1422,6 +1453,7 @@ return
 			endif
 			continue
 		endif
+
 		;--- parse parameters (key=DATA_SERVICE_PORT_ID, data_port_id=value)
 		strcompare groupmatchstr1 "DATA_SERVICE_PORT_ID"
 		if result == 0 then
@@ -1430,6 +1462,32 @@ return
 			strcompare tmpStr groupmatchstr2
 			if result <> 0 then
 				errMsg="Wrong value of 'DATA_SERVICE_PORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_I_TRAFFIC_TABLE_IDX, data_i_ttidx=value)
+		strcompare groupmatchstr1 "DATA_I_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int data_i_ttidx groupmatchstr2
+			int2str tmpStr data_i_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_i_ttidx > 1023 || data_i_ttidx < 0 then
+				errMsg="Wrong value of 'DATA_I_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=DATA_O_TRAFFIC_TABLE_IDX, data_o_ttidx=value)
+		strcompare groupmatchstr1 "DATA_O_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int data_o_ttidx groupmatchstr2
+			int2str tmpStr data_o_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || data_o_ttidx > 1023 || data_o_ttidx < 0 then
+				errMsg="Wrong value of 'DATA_O_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
 				goto errExit
 			endif
 			continue
@@ -1614,6 +1672,32 @@ return
 			continue
 		endif
 
+		;--- parse parameters (key=IPTV_I_TRAFFIC_TABLE_IDX, iptv_i_ttidx=value)
+		strcompare groupmatchstr1 "IPTV_I_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int iptv_i_ttidx groupmatchstr2
+			int2str tmpStr iptv_i_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_i_ttidx > 1023 || iptv_i_ttidx < 0 then
+				errMsg="Wrong value of 'IPTV_I_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=IPTV_O_TRAFFIC_TABLE_IDX, iptv_o_ttidx=value)
+		strcompare groupmatchstr1 "IPTV_O_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int iptv_o_ttidx groupmatchstr2
+			int2str tmpStr iptv_o_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || iptv_o_ttidx > 1023 || iptv_o_ttidx < 0 then
+				errMsg="Wrong value of 'IPTV_O_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
 		;--- parse parameters (key=IPTV_SERVICE_PORT_DESC, iptv_port_desc=value)
 		strcompare groupmatchstr1 "IPTV_SERVICE_PORT_DESC"
 		if result == 0 then
@@ -1778,6 +1862,7 @@ return
 			endif
 			continue
 		endif
+
 		;--- parse parameters (key=VOIP_ANI_VLAN_ID, voip_ani_vlan_id=value)
 		strcompare groupmatchstr1 "VOIP_ANI_VLAN_ID"
 		if result == 0 then
@@ -1799,6 +1884,32 @@ return
 			strcompare tmpStr groupmatchstr2
 			if result <> 0 then
 				errMsg="Wrong value of 'VOIP_SERVICE_PORT_ID'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_I_TRAFFIC_TABLE_IDX, voip_i_ttidx=value)
+		strcompare groupmatchstr1 "VOIP_I_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int voip_i_ttidx groupmatchstr2
+			int2str tmpStr voip_i_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_i_ttidx > 1023 || voip_i_ttidx < 0 then
+				errMsg="Wrong value of 'VOIP_I_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
+				goto errExit
+			endif
+			continue
+		endif
+
+		;--- parse parameters (key=VOIP_O_TRAFFIC_TABLE_IDX, voip_o_ttidx=value)
+		strcompare groupmatchstr1 "VOIP_O_TRAFFIC_TABLE_IDX"
+		if result == 0 then
+			str2int voip_o_ttidx groupmatchstr2
+			int2str tmpStr voip_o_ttidx
+			strcompare tmpStr groupmatchstr2
+			if result <> 0 || voip_o_ttidx > 1023 || voip_o_ttidx < 0 then
+				errMsg="Wrong value of 'VOIP_O_TRAFFIC_TABLE_IDX'\nPlease update your configuration file!"
 				goto errExit
 			endif
 			continue
@@ -2039,15 +2150,10 @@ return
 
 ;--- will update argument: op_mode
 :forceOPmode
-	strdim opModeMsg 4
-	opModeMsg[0] = "Add ONT"
-	opModeMsg[1] = "Del ONT"
-	opModeMsg[2] = "Del ONT + Add ONT"
-	opModeMsg[3] = "Do not replace"
-	listbox "Replace operation mode in config file" "select" opModeMsg 1
-    if result >= 0 && result <= 2 then
-        op_mode = result
-    endif
+	listbox "Replace operation mode in config file" "select" replaceOPmsg 1
+	if result >= 0 && result <= 2 then
+		op_mode = result
+	endif
 return
 
 
@@ -2073,14 +2179,10 @@ return
 
 ;--- needs argument: op_mode
 :updateLogFileName
-	strdim opModeStr 3
-	opModeStr[0] = "add"
-	opModeStr[1] = "del"
-	opModeStr[2] = "del+add"
 	gettime timeStr "%Y%m%d-%H%M%S"
 	strsplit log_file '.' 2
 	if result <> 2 goto errUpdateLogFileName
-	sprintf2 log_file "%s_%s_%s.%s" groupmatchstr1 opModeStr[op_mode] timeStr groupmatchstr2
+	sprintf2 log_file "%s_%s_%s.%s" groupmatchstr1 logFileOPstr[op_mode] timeStr groupmatchstr2
 	;dispstr #10#13 "log file=" log_file #10#13
 	result=0
 	return
@@ -2091,17 +2193,13 @@ return
 
 ;--- needs arguments: olt_ip, olt_user, olt_passwd
 :sshConnectOltMgmPort
-	strdim selectMsg 4
-	selectMsg[0] = "Try again"
-	selectMsg[1] = "Change IP Address of OLT management port"
-	selectMsg[2] = "Exit"
 	testlink
 	while result != 2
 		sprintf2 sshCmd "%s:22 /ssh /2 /auth=password /user=%s /passwd=%s /nosecuritywarning" olt_ip olt_user olt_passwd
 		connect sshCmd
 		if result == 2 break
 		sprintf2 msg "ssh: connect to '%s' port 22: Connection timed out!" olt_ip
-		listbox msg "select" selectMsg 1
+		listbox msg "select" ipRetryMsg 1
 		if result == 0 continue
 		if result == 2 || result == -1 goto normalExit
 		inputbox "Input IP address of OLT management port"#13#10"        (Abort program if empty)" "input" olt_ip
@@ -2292,6 +2390,12 @@ goto normalExit
 			logclose
 			sprintf2 cmdMsg "notepad %s" log_file
 			exec cmdMsg
+		endif
+		sprintf2 tmpStr "Next configuratin file?"
+		yesnobox tmpStr "Exit"
+		if result == 1 then
+			disconnect 0
+			goto nextCfg
 		endif
 		; do not close TeraTerm if not create log file!
 		if logEnabled <> 0 closett

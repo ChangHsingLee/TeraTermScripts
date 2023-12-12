@@ -1,0 +1,212 @@
+[2023-12-12 10:42:01.754] 
+[2023-12-12 10:42:01.754] 
+[2023-12-12 10:42:01.754]   Huawei Integrated Access Software (MA5800).
+[2023-12-12 10:42:01.754]   Copyright(C) Huawei Technologies Co., Ltd. 2002-2019. All rights reserved.
+[2023-12-12 10:42:01.760] 
+[2023-12-12 10:42:01.761] 
+[2023-12-12 10:42:01.761] MA5800-X7>
+[2023-12-12 10:42:01.772]   Warning: Using the initial password is not recommended. Please change the password.
+[2023-12-12 10:42:01.772] 
+[2023-12-12 10:42:01.772] MA5800-X7>enable 
+[2023-12-12 10:42:02.637] 
+[2023-12-12 10:42:02.637] MA5800-X7#config 
+[2023-12-12 10:42:02.777] 
+[2023-12-12 10:42:02.777] MA5800-X7(config)#display version 
+[2023-12-12 10:42:03.120] { <cr>|backplane<K>|frameid/slotid<S><Length 3-15>||<K> }: 
+[2023-12-12 10:42:03.177] 
+[2023-12-12 10:42:03.177]   Command:
+[2023-12-12 10:42:03.177]           display version
+[2023-12-12 10:42:03.191] 
+[2023-12-12 10:42:03.191]   VERSION : MA5800V100R019C11
+[2023-12-12 10:42:03.191]   PATCH   : SPH216
+[2023-12-12 10:42:03.191]   PRODUCT : MA5800-X7
+[2023-12-12 10:42:03.191] 
+[2023-12-12 10:42:03.193]   Active Mainboard Running Area Information: 
+[2023-12-12 10:42:03.193]   --------------------------------------------------
+[2023-12-12 10:42:03.193]   Current Program Area : Area A 
+[2023-12-12 10:42:03.193]   Current Data Area : Area A 
+[2023-12-12 10:42:03.193] 
+[2023-12-12 10:42:03.193]   Program Area A Version : MA5800V100R019C11 
+[2023-12-12 10:42:03.193]   Program Area B Version : MA5800V100R019C11 
+[2023-12-12 10:42:03.193] 
+[2023-12-12 10:42:03.193]   Data Area A Version : MA5800V100R019C11 
+[2023-12-12 10:42:03.193]   Data Area B Version : MA5800V100R019C11 
+[2023-12-12 10:42:03.193]   --------------------------------------------------
+[2023-12-12 10:42:03.193] 
+[2023-12-12 10:42:03.241]   Uptime is 1 day(s), 1 hour(s), 48 minute(s), 15 second(s)
+[2023-12-12 10:42:03.241] 
+[2023-12-12 10:42:03.241] MA5800-X7(config)#diagnose 
+[2023-12-12 10:42:03.460] 
+[2023-12-12 10:42:03.460] MA5800-X7(diagnose)%%display xpon mode 
+[2023-12-12 10:42:04.010] { <cr>||<K> }: 
+[2023-12-12 10:42:04.098] 
+[2023-12-12 10:42:04.098]   Command:
+[2023-12-12 10:42:04.098]           display xpon mode
+[2023-12-12 10:42:04.101]   -------------------------------------------------------
+[2023-12-12 10:42:04.101]         Current configuration mode: distributing-mode
+[2023-12-12 10:42:04.105]   -------------------------------------------------------
+[2023-12-12 10:42:04.107] 
+[2023-12-12 10:42:04.107] MA5800-X7(diagnose)%%config 
+[2023-12-12 10:42:04.307] 
+[2023-12-12 10:42:04.307] MA5800-X7(config)#display ont-profile profile-name DMS_ONT_GPT-5610C1 
+[2023-12-12 10:42:04.697] { <cr>||<K> }: 
+[2023-12-12 10:42:04.766] 
+[2023-12-12 10:42:04.766]   Command:
+[2023-12-12 10:42:04.766]           display ont-profile profile-name DMS_ONT_GPT-5610C1
+[2023-12-12 10:42:04.771]   ---------------------------------------------------------------------------
+[2023-12-12 10:42:04.771]   Profile ID  : 19
+[2023-12-12 10:42:04.771]   Profile name: DMS_ONT_GPT-5610C1
+[2023-12-12 10:42:04.771]   ---------------------------------------------------------------------------
+[2023-12-12 10:42:04.771]   Number of POTS ports:               0
+[2023-12-12 10:42:04.771]   Number of max POTS adaptive:        -
+[2023-12-12 10:42:04.771]   Number of ETH ports:                adaptive
+[2023-12-12 10:42:04.771]   Number of max ETH adaptive:         1
+[2023-12-12 10:42:04.771]   Number of VDSL ports:               0
+[2023-12-12 10:42:04.771]   Number of max VDSL adaptive:        -
+[2023-12-12 10:42:04.771]   TDM port type:                      E1
+[2023-12-12 10:42:04.771]   TDM service type:                   TDMoGem
+[2023-12-12 10:42:04.771]   Number of TDM ports:                0
+[2023-12-12 10:42:04.771]   Number of MOCA ports:               0
+[2023-12-12 10:42:04.771]   Number of CATV UNI ports:           0
+[2023-12-12 10:42:04.771]   Number of max CATV UNI adaptive:    -
+[2023-12-12 10:42:04.771]   Mapping mode:                       VLAN ID
+[2023-12-12 10:42:04.771]   The type of flow control:           PQ
+[2023-12-12 10:42:04.771]   ---------------------------------------------------------------------------
+[2023-12-12 10:42:04.771]   Binding times:                      0
+[2023-12-12 10:42:04.775]   ---------------------------------------------------------------------------
+[2023-12-12 10:42:04.775] 
+[2023-12-12 10:42:04.775] MA5800-X7(config)#display dba-profile profile-id 2 
+[2023-12-12 10:42:05.176] { <cr>||<K> }: 
+[2023-12-12 10:42:05.240] 
+[2023-12-12 10:42:05.240]   Command:
+[2023-12-12 10:42:05.240]           display dba-profile profile-id 2
+[2023-12-12 10:42:05.244]   -----------------------------------------------------------------
+[2023-12-12 10:42:05.244]   Profile-name :            dba-profile_2
+[2023-12-12 10:42:05.244]   Profile-ID:               2      
+[2023-12-12 10:42:05.244]   type:                     1
+[2023-12-12 10:42:05.244]   Bandwidth compensation:   No
+[2023-12-12 10:42:05.244]   Fix-delay:                No
+[2023-12-12 10:42:05.244]   Fix(kbps):                1024   
+[2023-12-12 10:42:05.244]   Assure(kbps):             0      
+[2023-12-12 10:42:05.244]   Max(kbps):                0      
+[2023-12-12 10:42:05.244]   Additional-bandwidth:     -
+[2023-12-12 10:42:05.244]   Best-effort-priority:     -
+[2023-12-12 10:42:05.244]   Best-effort-weight:       -
+[2023-12-12 10:42:05.244]   bind-times:               24
+[2023-12-12 10:42:05.247]   -----------------------------------------------------------------
+[2023-12-12 10:42:05.247] 
+[2023-12-12 10:42:05.247] MA5800-X7(config)#display dba-profile profile-name DMS-3-2.5G-10G 
+[2023-12-12 10:42:05.639] { <cr>||<K> }: 
+[2023-12-12 10:42:05.700] 
+[2023-12-12 10:42:05.700]   Command:
+[2023-12-12 10:42:05.700]           display dba-profile profile-name DMS-3-2.5G-10G
+[2023-12-12 10:42:05.707]   -----------------------------------------------------------------
+[2023-12-12 10:42:05.707]   Profile-name :            DMS-3-2.5G-10G
+[2023-12-12 10:42:05.707]   Profile-ID:               45     
+[2023-12-12 10:42:05.707]   type:                     3
+[2023-12-12 10:42:05.707]   Bandwidth compensation:   No
+[2023-12-12 10:42:05.707]   Fix-delay:                No
+[2023-12-12 10:42:05.707]   Fix(kbps):                0      
+[2023-12-12 10:42:05.707]   Assure(kbps):             2621440
+[2023-12-12 10:42:05.707]   Max(kbps):                9480000
+[2023-12-12 10:42:05.707]   Additional-bandwidth:     -
+[2023-12-12 10:42:05.707]   Best-effort-priority:     -
+[2023-12-12 10:42:05.707]   Best-effort-weight:       -
+[2023-12-12 10:42:05.707]   bind-times:               0
+[2023-12-12 10:42:05.710]   -----------------------------------------------------------------
+[2023-12-12 10:42:05.710] 
+[2023-12-12 10:42:05.710] MA5800-X7(config)#interface gpon 0/2 
+[2023-12-12 10:42:05.882] 
+[2023-12-12 10:42:05.882] MA5800-X7(config-if-gpon-0/2)#ont add 12 3 password-auth GPT5610C1_003  always-on profile-name DMS _ONT_GPT-5610C1 manage-mode omci ont-type 10g/10g 
+
+	ONT Added
+
+desc "GPT-5610C1-ONT3-BSQA_ENV-passwd_auth-1serv ice-DBA3_2.5G_10G" 
+[2023-12-12 10:42:06.111]   Number of ONTs that can be added: 1, success: 1
+[2023-12-12 10:42:06.111]   PortID :12, ONTID :3
+[2023-12-12 10:42:06.114] 
+[2023-12-12 10:42:06.114] MA5800-X7(config-if-gpon-0/2)#tcont modify-profile 12 3 0 profile-id 2 
+[2023-12-12 10:42:06.218]   Modifying a bound DBA-profile succeeded
+[2023-12-12 10:42:06.218] 
+[2023-12-12 10:42:06.218] MA5800-X7(config-if-gpon-0/2)#quit 
+[2023-12-12 10:42:06.322] 
+[2023-12-12 10:42:06.322] MA5800-X7(config)#
+[2023-12-12 10:42:06.397] 
+[2023-12-12 10:42:06.397] MA5800-X7(config)#interface gpon 0/2 
+[2023-12-12 10:42:06.593] 
+[2023-12-12 10:42:06.593] MA5800-X7(config-if-gpon-0/2)#tcont bind-profile 12 3 1 profile-name "DMS-3-2.5G-10G" 
+[2023-12-12 10:42:06.715]   Binding DBA-profile succeeded: 1
+[2023-12-12 10:42:06.715]   Binding DBA-profile failed: 0
+[2023-12-12 10:42:06.715] 
+[2023-12-12 10:42:06.715] MA5800-X7(config-if-gpon-0/2)#gemport add 12 gemportid 138 eth encrypt on 
+[2023-12-12 10:42:06.786] { <cr>|cascade<K> }: 
+[2023-12-12 10:42:06.800] 
+[2023-12-12 10:42:06.800]   Command:
+[2023-12-12 10:42:06.800]           gemport add 12 gemportid 138 eth encrypt on
+[2023-12-12 10:42:06.806]   Adding a GEM port succeeded
+[2023-12-12 10:42:06.808] 
+[2023-12-12 10:42:06.808] MA5800-X7(config-if-gpon-0/2)#ont gemport bind 12 3 138 1 priority-queue 2 
+[2023-12-12 10:42:06.929] { <cr>|downstream-priority-queue<K> }: 
+[2023-12-12 10:42:06.974] 
+[2023-12-12 10:42:06.974]   Command:
+[2023-12-12 10:42:06.974]           ont gemport bind 12 3 138 1 priority-queue 2
+[2023-12-12 10:42:06.978]  The GEM port(s) bind the T-CONT successfully
+[2023-12-12 10:42:06.980] 
+[2023-12-12 10:42:06.980] MA5800-X7(config-if-gpon-0/2)#ont gemport mapping 12 3 138 vlan 2 
+[2023-12-12 10:42:07.145] { <cr>|flow-car<K>|priority<K>|transparent<K> }: 
+[2023-12-12 10:42:07.176] 
+[2023-12-12 10:42:07.176]   Command:
+[2023-12-12 10:42:07.176]           ont gemport mapping 12 3 138 vlan 2
+[2023-12-12 10:42:07.186]  Add the GEM port mapping successfully
+[2023-12-12 10:42:07.186] 
+[2023-12-12 10:42:07.186] MA5800-X7(config-if-gpon-0/2)#ont native-vlan 12 3 unconcern 
+[2023-12-12 10:42:07.262] 
+[2023-12-12 10:42:07.262] MA5800-X7(config-if-gpon-0/2)#ont port vlan 12 3 eth untagged 1 q-in-q s-vlan 2 
+[2023-12-12 10:42:07.481] { <cr>|prival<U><0,7>|s-priority<K> }: 
+[2023-12-12 10:42:07.541] 
+[2023-12-12 10:42:07.541]   Command:
+[2023-12-12 10:42:07.541]           ont port vlan 12 3 eth untagged 1 q-in-q s-vlan 2
+[2023-12-12 10:42:07.541]   Set ONT port(s) VLAN configuration, success: 1, failed: 0
+[2023-12-12 10:42:07.541] 
+[2023-12-12 10:42:07.541] MA5800-X7(config-if-gpon-0/2)#ont multicast-forward 12 3 tag translation 2 
+[2023-12-12 10:42:07.651] 
+[2023-12-12 10:42:07.651] MA5800-X7(config-if-gpon-0/2)#quit 
+[2023-12-12 10:42:08.648] 
+[2023-12-12 10:42:08.648] MA5800-X7(config)#service-port 12020 vlan 526 gpon 0/2/12 gemport 138 multi-service user-vlan 2 ta g-transform translate inbound traffic-table index 6 outbound traffic-table index 6 
+[2023-12-12 10:42:09.270] 
+[2023-12-12 10:42:09.270] MA5800-X7(config)#service-port desc 12020 description "ONT-0/2/12-3-gem138-iptvService" 
+[2023-12-12 10:42:09.544] 
+[2023-12-12 10:42:09.544] MA5800-X7(config)#btv 
+[2023-12-12 10:42:09.772] 
+[2023-12-12 10:42:09.772] MA5800-X7(config-btv)#igmp user add service-port 12020 auth max-program 12 
+[2023-12-12 10:42:09.877] { <cr>|globalleave<K>|igmp-ipv6-version<K>|igmp-version<K>|log<K>|max-bandwidth<K>|quickleave<K>|video<K> }: 
+[2023-12-12 10:42:09.901] 
+[2023-12-12 10:42:09.901]   Command:
+[2023-12-12 10:42:09.901]           igmp user add service-port 12020 auth max-program 12
+[2023-12-12 10:42:09.908] 
+[2023-12-12 10:42:09.908] MA5800-X7(config-btv)#multicast-vlan 509 
+[2023-12-12 10:42:10.042] 
+[2023-12-12 10:42:10.042] MA5800-X7(config-mvlan509)#igmp multicast-vlan member service-port 12020 
+[2023-12-12 10:42:10.105] 
+[2023-12-12 10:42:10.105] MA5800-X7(config-mvlan509)#multicast-vlan 1218 
+[2023-12-12 10:42:10.244] 
+[2023-12-12 10:42:10.244] MA5800-X7(config-mvlan1218)#igmp multicast-vlan member service-port 12020 
+[2023-12-12 10:42:10.306] 
+[2023-12-12 10:42:10.306] MA5800-X7(config-mvlan1218)#btv 
+[2023-12-12 10:42:10.349] 
+[2023-12-12 10:42:10.349] MA5800-X7(config-btv)#igmp user bind-profile service-port 12020 profile-index-list 1-3,6,1218 
+[2023-12-12 10:42:10.443]   Command is being executed. Please wait...
+[2023-12-12 10:42:10.444]   User    success: 1      failure: 0    
+[2023-12-12 10:42:10.444]   Profile success: 5      failure: 0    
+[2023-12-12 10:42:10.444] 
+[2023-12-12 10:42:10.444] MA5800-X7(config-btv)#quit 
+
+	IPTV Service Added
+
+
+
+	Done.
+[2023-12-12 10:42:10.500] 
+[2023-12-12 10:42:10.500] MA5800-X7(config)#
+[2023-12-12 10:42:10.579] 
+[2023-12-12 10:42:10.579] MA5800-X7(config)#
